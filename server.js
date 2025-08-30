@@ -17,7 +17,8 @@ const PORT = process.env.PORT || 5000;
 // -------------------- CORS --------------------
 const allowedOrigins = [
   "https://shippinglablecropper-git-main-pratapshouryasinghs-projects.vercel.app",
-  "https://shippinglablecropper.vercel.app"
+  "https://shippinglablecropper.vercel.app",
+  "https://www.shippinglabelcrop.in"
 ];
 
 app.use(
