@@ -1,3 +1,4 @@
+
 import express from "express";
 import dotenv from "dotenv";
 import multer from "multer";
@@ -61,15 +62,6 @@ const upload = multer({
 });
 
 // -------------------- Helpers --------------------
-function normalizeTool(tool) {
-  const map = {
-    flipkartcropper: "FlipkartCropper",
-    meshoocropper: "MeshooCropper",
-    jiomartcropper: "JioMartCropper",
-  };
-  return map[tool.toLowerCase()] || tool;
-}
-
 function makeJobDirs(toolName) {
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const jobId = `job_${ts}`;
@@ -153,8 +145,7 @@ async function processTool(toolName, req, res) {
       .filter((f) => f.endsWith(".pdf") || f.endsWith(".xlsx"))
       .map((name) => ({
         name,
-        url: `/api/${toolName}/output/${jobId}/${name}`, // ✅ changed to output
-        downloadUrl: `/api/${toolName}/download/${jobId}/${name}`, // ✅ keep download also
+        url: `/api/${toolName.toLowerCase()}/download/${jobId}/${name}`,
       }));
 
     // Save history
@@ -192,31 +183,9 @@ app.post("/api/jiomart", upload.array("files", 50), (req, res) =>
   processTool("JioMartCropper", req, res)
 );
 
-// View/Open output
-app.get("/api/:tool/output/:jobId/:filename", (req, res) => {
-  let { tool, jobId, filename } = req.params;
-  tool = normalizeTool(tool);
-
-  const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
-
-  if (filename.endsWith(".pdf")) {
-    res.setHeader("Content-Type", "application/pdf");
-  } else if (filename.endsWith(".xlsx")) {
-    res.setHeader(
-      "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    );
-  }
-
-  res.sendFile(filePath);
-});
-
 // Download output
 app.get("/api/:tool/download/:jobId/:filename", (req, res) => {
-  let { tool, jobId, filename } = req.params;
-  tool = normalizeTool(tool);
-
+  const { tool, jobId, filename } = req.params;
   const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
   if (fs.existsSync(filePath)) res.download(filePath);
   else res.status(404).json({ error: "File not found" });
@@ -264,8 +233,7 @@ app.get("/api/admin/files", async (_req, res) => {
             jobId,
             name,
             size: stats.size,
-            url: `/api/${tool}/output/${jobId}/${name}`, // ✅ serve open url
-            downloadUrl: `/api/${tool}/download/${jobId}/${name}`, // ✅ serve download url
+            url: `/api/${tool}/download/${jobId}/${name}`,
           });
         });
       }
@@ -280,9 +248,7 @@ app.get("/api/admin/files", async (_req, res) => {
 // Admin delete file
 app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
   try {
-    let { tool, jobId, filename } = req.params;
-    tool = normalizeTool(tool);
-
+    const { tool, jobId, filename } = req.params;
     const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
 
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
@@ -296,3 +262,4 @@ app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
 
 // -------------------- Start --------------------
 app.listen(PORT, () => console.log(`🚀 Server running at http://localhost:${PORT}`));
+ok this works fine for delete and downloadall but op panne
