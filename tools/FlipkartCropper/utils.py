@@ -218,7 +218,7 @@ def pdf_cropper(pdf_path, config, temp_path):
                 text_instances = invoice_page.search_for("TAX INVOICE")
                 if text_instances:
                     invoice_rect = fitz.Rect(
-                        0, text_instances[0].y0 - 100,
+                        0, text_instances[0].y0 + 300,
                         invoice_page.rect.width,
                         invoice_page.rect.height
                     )
