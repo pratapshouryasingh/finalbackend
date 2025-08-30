@@ -20,6 +20,7 @@ const allowedOrigins = [
   "https://shippinglablecropper-git-main-pratapshouryasinghs-projects.vercel.app",
   "http://localhost:5173",
   "http://localhost:5000",
+  "https://shippinglablecropper.vercel.app"
 ];
 
 app.use(
