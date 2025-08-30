@@ -35,11 +35,12 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: "5000MB" })); // increased limit
+app.use(express.json({ limit: "2000MB" }));
 
 // -------------------- MongoDB --------------------
+const MONGODB_URI = process.env.MONGODB_URI;
 mongoose
-  .connect(process.env.MONGODB_URI)
+  .connect(MONGODB_URI)
   .then(() => console.log("🟢 Connected to MongoDB Atlas"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
 
@@ -53,7 +54,7 @@ fs.mkdirSync(TMP_UPLOADS, { recursive: true });
 
 const upload = multer({
   dest: TMP_UPLOADS,
-  limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB per file
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
   fileFilter: (_req, file, cb) => {
     if (file.mimetype === "application/pdf") cb(null, true);
     else cb(new Error("Only PDF files allowed"));
@@ -79,7 +80,8 @@ function runPython({ inputDir, outputDir, toolsRoot }) {
       cwd: toolsRoot,
     });
 
-    let stdout = "", stderr = "";
+    let stdout = "",
+      stderr = "";
     child.stdout.on("data", (d) => (stdout += d.toString()));
     child.stderr.on("data", (d) => (stderr += d.toString()));
 
@@ -93,7 +95,7 @@ function runPython({ inputDir, outputDir, toolsRoot }) {
   });
 }
 
-async function waitForOutputs(dir, timeoutMs = 120000) { // 2 min
+async function waitForOutputs(dir, timeoutMs = 60000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const files = await fsp.readdir(dir);
@@ -171,13 +173,13 @@ async function processTool(toolName, req, res) {
 }
 
 // -------------------- Routes --------------------
-app.post("/api/flipkart", upload.array("files"), (req, res) =>
+app.post("/api/flipkart", upload.array("files", 50), (req, res) =>
   processTool("FlipkartCropper", req, res)
 );
-app.post("/api/meesho", upload.array("files"), (req, res) =>
+app.post("/api/meesho", upload.array("files", 50), (req, res) =>
   processTool("MeshooCropper", req, res)
 );
-app.post("/api/jiomart", upload.array("files"), (req, res) =>
+app.post("/api/jiomart", upload.array("files", 50), (req, res) =>
   processTool("JioMartCropper", req, res)
 );
 
@@ -260,3 +262,4 @@ app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
 
 // -------------------- Start --------------------
 app.listen(PORT, () => console.log(`🚀 Server running at http://localhost:${PORT}`));
+//check it once
