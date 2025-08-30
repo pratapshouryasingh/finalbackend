@@ -1,4 +1,3 @@
-
 // server.js
 import express from "express";
 import dotenv from "dotenv";
@@ -36,7 +35,7 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: "200MB" }));
+app.use(express.json({ limit: "50mb" }));
 
 // -------------------- MongoDB --------------------
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -55,7 +54,7 @@ fs.mkdirSync(TMP_UPLOADS, { recursive: true });
 
 const upload = multer({
   dest: TMP_UPLOADS,
-  limits: { fileSize: 200 * 1024 * 1024 }, // 50 MB
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
   fileFilter: (_req, file, cb) => {
     if (file.mimetype === "application/pdf") cb(null, true);
     else cb(new Error("Only PDF files allowed"));
