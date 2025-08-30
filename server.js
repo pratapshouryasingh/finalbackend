@@ -1,3 +1,4 @@
+
 // server.js
 import express from "express";
 import dotenv from "dotenv";
@@ -35,7 +36,7 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: "2000MB" }));
+app.use(express.json({ limit: "50mb" }));
 
 // -------------------- MongoDB --------------------
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -262,4 +263,3 @@ app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
 
 // -------------------- Start --------------------
 app.listen(PORT, () => console.log(`🚀 Server running at http://localhost:${PORT}`));
-//check it once
