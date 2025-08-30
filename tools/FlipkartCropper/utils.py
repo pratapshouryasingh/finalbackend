@@ -195,25 +195,32 @@ def pdf_cropper(pdf_path, config, temp_path):
     for page_no in tqdm(range(len(doc))):
         page = doc[page_no]
         try:
-            # Crop label
+            # --- Crop label ---
             text_instances = page.search_for("Order Id:")[0]
-            page_crop_rect = fitz.Rect(185, 15, page.rect.width - 185, text_instances.y0 - 10)
-            page.set_cropbox(page_crop_rect)
+            page_crop_rect = fitz.Rect(
+                185, 15, page.rect.width - 185, text_instances.y0 - 10
+            )
+            cropped_page = page  # keep reference
+            cropped_page.set_cropbox(page_crop_rect)
 
             if config.get("add_date_on_top", False):
-                page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
+                cropped_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
             if config.get("keep_invoice", False):
-                invoice_page = page  # reuse same page for simplicity
-                if config.get("invoice_first", True):
-                    result.insert_pdf(doc, from_page=page_no, to_page=page_no)
-                    result.insert_pdf(doc, from_page=page_no, to_page=page_no)
+                if config.get("invoice_last", True):
+                    # first cropped label, then invoice
+                    result.insert_pdf(doc, from_page=page_no, to_page=page_no)  # cropped
+                    result.insert_pdf(doc, from_page=page_no, to_page=page_no, overlay=False)  # full invoice
                 else:
-                    result.insert_pdf(doc, from_page=page_no, to_page=page_no)
-                    result.insert_pdf(doc, from_page=page_no, to_page=page_no)
+                    # first invoice, then cropped label
+                    result.insert_pdf(doc, from_page=page_no, to_page=page_no, overlay=False)  # full invoice
+                    result.insert_pdf(doc, from_page=page_no, to_page=page_no)  # cropped
             else:
+                # only cropped label
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
-        except:
+
+        except Exception as e:
+            print(f"Error on page {page_no}: {e}")
             result.insert_pdf(doc, from_page=page_no, to_page=page_no)
 
     doc.close()
