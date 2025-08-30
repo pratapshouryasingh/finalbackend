@@ -217,14 +217,15 @@ def pdf_cropper(pdf_path, config, temp_path):
                 # ---- CROP INVOICE (from TAX INVOICE downwards) ----
                 text_instances = invoice_page.search_for("TAX INVOICE")
                 if text_instances:
+                    offset = 10  # start 10 pts below TAX INVOICE
                     invoice_rect = fitz.Rect(
-                        0, text_instances[0].y0 - 200,
+                        0, text_instances[0].y0 + offset,  # move downwards
                         invoice_page.rect.width,
                         invoice_page.rect.height
                     )
                     invoice_page.set_cropbox(invoice_rect)
                 else:
-                    # fallback
+                    # fallback: full page
                     invoice_page.set_cropbox(invoice_page.rect)
 
             else:
