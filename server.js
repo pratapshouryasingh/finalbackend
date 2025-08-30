@@ -1,3 +1,4 @@
+
 import express from "express";
 import dotenv from "dotenv";
 import multer from "multer";
@@ -6,8 +7,8 @@ import path from "path";
 import fs from "fs";
 import fsp from "fs/promises";
 import { spawn } from "child_process";
-import mongoose from "mongoose";
-import History from "./historyModel.js";
+import mongoose from "mongoose"; 
+import History from "./historyModel.js"; 
 
 dotenv.config();
 
@@ -17,7 +18,7 @@ const PORT = process.env.PORT || 5000;
 // ✅ Allowed origins (Vercel + Localhost)
 const allowedOrigins = [
   "https://shippinglablecropper-git-main-pratapshouryasinghs-projects.vercel.app",
-  "http://localhost:5173",
+  "http://localhost:5173"
 ];
 
 app.use(
@@ -62,13 +63,6 @@ const upload = multer({
     else cb(new Error("Only PDF files allowed"));
   },
 });
-
-// 🗂 Tool name mapping
-const toolMap = {
-  flipkart: "FlipkartCropper",
-  jiomart: "JioMartCropper",
-  meesho: "MeshooCropper", // fix: consistent spelling
-};
 
 // Create per-job folders
 function makeJobDirs(toolName) {
@@ -151,13 +145,11 @@ async function processTool(toolName, req, res) {
 
     const files = await waitForOutputs(outputDir);
 
-    const toolKey = Object.keys(toolMap).find((k) => toolMap[k] === toolName);
-
     const outputs = files
       .filter((f) => f.endsWith(".pdf") || f.endsWith(".xlsx"))
       .map((name) => ({
         name,
-        url: `/api/${toolKey}/download/${jobId}/${name}`,
+        url: `/api/${toolName.toLowerCase()}/download/${jobId}/${name}`,
       }));
 
     let updatedHistory = [];
@@ -197,13 +189,10 @@ app.post("/api/jiomart", upload.array("files", 50), (req, res) =>
   processTool("JioMartCropper", req, res)
 );
 
-// ✅ Fixed Download route with toolMap
+// Download route
 app.get("/api/:tool/download/:jobId/:filename", (req, res) => {
   const { tool, jobId, filename } = req.params;
-  const folder = toolMap[tool.toLowerCase()];
-  if (!folder) return res.status(400).json({ error: "Invalid tool" });
-
-  const filePath = path.join(process.cwd(), "tools", folder, "output", jobId, filename);
+  const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
   if (fs.existsSync(filePath)) res.download(filePath);
   else res.status(404).json({ error: "File not found" });
 });
@@ -230,8 +219,8 @@ app.get("/api/admin/files", async (req, res) => {
 
     let allFiles = [];
 
-    for (const folder of tools) {
-      const outputRoot = path.join(toolsRoot, folder, "output");
+    for (const tool of tools) {
+      const outputRoot = path.join(toolsRoot, tool, "output");
       if (!fs.existsSync(outputRoot)) continue;
 
       const jobs = await fsp.readdir(outputRoot);
@@ -243,18 +232,16 @@ app.get("/api/admin/files", async (req, res) => {
           (f) => f.endsWith(".pdf") || f.endsWith(".xlsx")
         );
 
-        const toolKey = Object.keys(toolMap).find((k) => toolMap[k] === folder);
-
         files.forEach((name) => {
           const filePath = path.join(jobDir, name);
           const stats = fs.existsSync(filePath) ? fs.statSync(filePath) : { size: 0 };
 
           allFiles.push({
-            tool: folder,
+            tool,
             jobId,
             name,
             size: stats.size,
-            url: `/api/${toolKey}/download/${jobId}/${name}`,
+            url: `/api/${tool}/download/${jobId}/${name}`,
           });
         });
       }
@@ -271,10 +258,7 @@ app.get("/api/admin/files", async (req, res) => {
 app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
   try {
     const { tool, jobId, filename } = req.params;
-    const folder = toolMap[tool.toLowerCase()];
-    if (!folder) return res.status(400).json({ error: "Invalid tool" });
-
-    const filePath = path.join(process.cwd(), "tools", folder, "output", jobId, filename);
+    const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
 
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: "File not found" });
