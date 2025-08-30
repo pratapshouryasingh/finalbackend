@@ -146,7 +146,7 @@ async function processTool(toolName, req, res) {
       .filter((f) => f.endsWith(".pdf") || f.endsWith(".xlsx"))
       .map((name) => ({
         name,
-        url: `/api/${toolName.toLowerCase()}/download/${jobId}/${name}`,
+        url: `/api/${toolName}/download/${jobId}/${name}`,
       }));
 
     // Save history
