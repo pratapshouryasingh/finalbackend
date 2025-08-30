@@ -208,9 +208,8 @@ def pdf_cropper(pdf_path, config, temp_path):
 
             if config.get("keep_invoice", False):
                 if config.get("invoice_last", True):
-                    # first cropped label, then invoice
-                    result.insert_pdf(doc, from_page=page_no, to_page=page_no)  # cropped
-                    result.insert_pdf(doc, from_page=page_no, to_page=page_no, overlay=False)  # full invoice
+                    result.insert_pdf(invoice, from_page=page_no, to_page=page_no)
+                    result.insert_pdf(main, from_page=page_no, to_page=page_no)
                 else:
                     # first invoice, then cropped label
                     result.insert_pdf(doc, from_page=page_no, to_page=page_no, overlay=False)  # full invoice
