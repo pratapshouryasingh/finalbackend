@@ -187,10 +187,21 @@ app.post("/api/jiomart", upload.array("files", 50), (req, res) =>
 // Download output
 app.get("/api/:tool/download/:jobId/:filename", (req, res) => {
   const { tool, jobId, filename } = req.params;
-  const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
+
+  // Map lowercase tool → correct folder
+  const toolMap = {
+    flipkart: "FlipkartCropper",
+    meesho: "MeshooCropper",
+    jiomart: "JioMartCropper",
+  };
+
+  const toolName = toolMap[tool.toLowerCase()] || tool;
+  const filePath = path.join(process.cwd(), "tools", toolName, "output", jobId, filename);
+
   if (fs.existsSync(filePath)) res.download(filePath);
   else res.status(404).json({ error: "File not found" });
 });
+
 
 // User history
 app.get("/api/history/:userId", async (req, res) => {
