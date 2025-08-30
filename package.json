@@ -1,0 +1,22 @@
+{
+  "type": "module",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^4.21.2",
+    "fs": "^0.0.1-security",
+    "googleapis": "^157.0.0",
+    "mongodb": "^6.18.0",
+    "mongoose": "^8.18.0",
+    "multer": "^2.0.2",
+    "path": "^0.12.7",
+    "url": "^0.11.4"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "postinstall": "pip install -r requirements.txt || pip3 install -r requirements.txt"
+  },
+  "engines": {
+    "node": "22.x"
+  }
+}
