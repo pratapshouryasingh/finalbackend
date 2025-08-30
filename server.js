@@ -21,7 +21,6 @@ const allowedOrigins = [
   "http://localhost:5000"
 ];
 
-// ✅ CORS middleware
 app.use(
   cors({
     origin: function (origin, callback) {
@@ -35,9 +34,7 @@ app.use(
   })
 );
 
-// ✅ Increase body size limits to fix 413 errors
-app.use(express.json({ limit: "200mb" }));
-app.use(express.urlencoded({ extended: true, limit: "200mb" }));
+app.use(express.json());
 
 // 🔗 Connect to MongoDB
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -60,12 +57,19 @@ fs.mkdirSync(TMP_UPLOADS, { recursive: true });
 
 const upload = multer({
   dest: TMP_UPLOADS,
-  limits: { fileSize: 200 * 1024 * 1024 }, // ⬆ increase file size to 200MB
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype === "application/pdf") cb(null, true);
     else cb(new Error("Only PDF files allowed"));
   },
 });
+
+// 🗂 Tool name mapping
+const toolMap = {
+  flipkart: "FlipkartCropper",
+  jiomart: "JioMartCropper",
+  meesho: "MeshooCropper", // fix: consistent spelling
+};
 
 // Create per-job folders
 function makeJobDirs(toolName) {
@@ -148,11 +152,13 @@ async function processTool(toolName, req, res) {
 
     const files = await waitForOutputs(outputDir);
 
+    const toolKey = Object.keys(toolMap).find((k) => toolMap[k] === toolName);
+
     const outputs = files
       .filter((f) => f.endsWith(".pdf") || f.endsWith(".xlsx"))
       .map((name) => ({
         name,
-        url: `/api/${toolName.toLowerCase()}/download/${jobId}/${name}`,
+        url: `/api/${toolKey}/download/${jobId}/${name}`,
       }));
 
     let updatedHistory = [];
@@ -192,10 +198,13 @@ app.post("/api/jiomart", upload.array("files", 50), (req, res) =>
   processTool("JioMartCropper", req, res)
 );
 
-// Download route
+// ✅ Fixed Download route with toolMap
 app.get("/api/:tool/download/:jobId/:filename", (req, res) => {
   const { tool, jobId, filename } = req.params;
-  const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
+  const folder = toolMap[tool.toLowerCase()];
+  if (!folder) return res.status(400).json({ error: "Invalid tool" });
+
+  const filePath = path.join(process.cwd(), "tools", folder, "output", jobId, filename);
   if (fs.existsSync(filePath)) res.download(filePath);
   else res.status(404).json({ error: "File not found" });
 });
@@ -222,8 +231,8 @@ app.get("/api/admin/files", async (req, res) => {
 
     let allFiles = [];
 
-    for (const tool of tools) {
-      const outputRoot = path.join(toolsRoot, tool, "output");
+    for (const folder of tools) {
+      const outputRoot = path.join(toolsRoot, folder, "output");
       if (!fs.existsSync(outputRoot)) continue;
 
       const jobs = await fsp.readdir(outputRoot);
@@ -235,16 +244,18 @@ app.get("/api/admin/files", async (req, res) => {
           (f) => f.endsWith(".pdf") || f.endsWith(".xlsx")
         );
 
+        const toolKey = Object.keys(toolMap).find((k) => toolMap[k] === folder);
+
         files.forEach((name) => {
           const filePath = path.join(jobDir, name);
           const stats = fs.existsSync(filePath) ? fs.statSync(filePath) : { size: 0 };
 
           allFiles.push({
-            tool,
+            tool: folder,
             jobId,
             name,
             size: stats.size,
-            url: `/api/${tool}/download/${jobId}/${name}`,
+            url: `/api/${toolKey}/download/${jobId}/${name}`,
           });
         });
       }
@@ -261,7 +272,10 @@ app.get("/api/admin/files", async (req, res) => {
 app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
   try {
     const { tool, jobId, filename } = req.params;
-    const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
+    const folder = toolMap[tool.toLowerCase()];
+    if (!folder) return res.status(400).json({ error: "Invalid tool" });
+
+    const filePath = path.join(process.cwd(), "tools", folder, "output", jobId, filename);
 
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: "File not found" });
@@ -277,3 +291,4 @@ app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`✅ Server running at http://localhost:${PORT}`));
+
