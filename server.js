@@ -11,7 +11,6 @@ import mongoose from "mongoose";
 import History from "./historyModel.js";
 
 dotenv.config();
-
 const app = express();
 const PORT = process.env.PORT || 5000;
 
