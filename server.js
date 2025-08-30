@@ -35,12 +35,11 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: "2000MB" }));
+app.use(express.json({ limit: "5000MB" })); // increased limit
 
 // -------------------- MongoDB --------------------
-const MONGODB_URI = process.env.MONGODB_URI;
 mongoose
-  .connect(MONGODB_URI)
+  .connect(process.env.MONGODB_URI)
   .then(() => console.log("🟢 Connected to MongoDB Atlas"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
 
@@ -54,7 +53,7 @@ fs.mkdirSync(TMP_UPLOADS, { recursive: true });
 
 const upload = multer({
   dest: TMP_UPLOADS,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB per file
   fileFilter: (_req, file, cb) => {
     if (file.mimetype === "application/pdf") cb(null, true);
     else cb(new Error("Only PDF files allowed"));
@@ -80,8 +79,7 @@ function runPython({ inputDir, outputDir, toolsRoot }) {
       cwd: toolsRoot,
     });
 
-    let stdout = "",
-      stderr = "";
+    let stdout = "", stderr = "";
     child.stdout.on("data", (d) => (stdout += d.toString()));
     child.stderr.on("data", (d) => (stderr += d.toString()));
 
@@ -95,7 +93,7 @@ function runPython({ inputDir, outputDir, toolsRoot }) {
   });
 }
 
-async function waitForOutputs(dir, timeoutMs = 60000) {
+async function waitForOutputs(dir, timeoutMs = 120000) { // 2 min
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const files = await fsp.readdir(dir);
@@ -173,13 +171,13 @@ async function processTool(toolName, req, res) {
 }
 
 // -------------------- Routes --------------------
-app.post("/api/flipkart", upload.array("files", 50), (req, res) =>
+app.post("/api/flipkart", upload.array("files"), (req, res) =>
   processTool("FlipkartCropper", req, res)
 );
-app.post("/api/meesho", upload.array("files", 50), (req, res) =>
+app.post("/api/meesho", upload.array("files"), (req, res) =>
   processTool("MeshooCropper", req, res)
 );
-app.post("/api/jiomart", upload.array("files", 50), (req, res) =>
+app.post("/api/jiomart", upload.array("files"), (req, res) =>
   processTool("JioMartCropper", req, res)
 );
 
