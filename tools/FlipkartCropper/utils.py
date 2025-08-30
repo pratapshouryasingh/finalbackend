@@ -185,7 +185,6 @@ def pdf_whitespace(pdf_path, temp_path):
     doc.close()
     return save_path
 
-# ---------------------- PDF Cropper ----------------------
 def pdf_cropper(pdf_path, config, temp_path):
     now = datetime.now()
     formatted_datetime = now.strftime("%d-%m-%y %I:%M %p")
@@ -253,6 +252,7 @@ def pdf_cropper(pdf_path, config, temp_path):
     result.close()
     return output_filename
 
+
 # ---------------------- Create Count Excel ----------------------
 def create_count_excel(df, output_path):
     df["sku"] = df["sku"].astype(str).str.strip().replace({"nan": "", "None": ""})
@@ -282,3 +282,4 @@ def create_count_excel(df, output_path):
 
     print(f"✅ {filename} generated successfully.")
     return summary_path
+
