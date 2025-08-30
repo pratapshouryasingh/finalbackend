@@ -35,7 +35,7 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: "50mb" }));
+app.use(express.json({ limit: "2000MB" }));
 
 // -------------------- MongoDB --------------------
 const MONGODB_URI = process.env.MONGODB_URI;
