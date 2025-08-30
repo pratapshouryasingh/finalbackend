@@ -1,4 +1,3 @@
-// server.js
 import express from "express";
 import dotenv from "dotenv";
 import multer from "multer";
@@ -34,6 +33,16 @@ app.use(
   })
 );
 
+// Extra safeguard: set headers for ALL responses
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", req.headers.origin || "*");
+  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.header("Access-Control-Allow-Credentials", "true");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
+  next();
+});
+
 app.use(express.json({ limit: "50mb" }));
 
 // -------------------- MongoDB --------------------
@@ -43,17 +52,17 @@ mongoose
   .then(() => console.log("🟢 Connected to MongoDB Atlas"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
 
-// -------------------- Health Check --------------------
+// -------------------- Health --------------------
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 app.get("/", (_req, res) => res.send("✅ Server is running"));
 
-// -------------------- Multer Upload --------------------
+// -------------------- Multer --------------------
 const TMP_UPLOADS = path.join(process.cwd(), "tmp_uploads");
 fs.mkdirSync(TMP_UPLOADS, { recursive: true });
 
 const upload = multer({
   dest: TMP_UPLOADS,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype === "application/pdf") cb(null, true);
     else cb(new Error("Only PDF files allowed"));
@@ -61,6 +70,12 @@ const upload = multer({
 });
 
 // -------------------- Helpers --------------------
+const toolMap = {
+  flipkart: "FlipkartCropper",
+  meesho: "MeshooCropper",
+  jiomart: "JioMartCropper",
+};
+
 function makeJobDirs(toolName) {
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const jobId = `job_${ts}`;
@@ -104,7 +119,6 @@ async function waitForOutputs(dir, timeoutMs = 60000) {
   throw new Error("No output files generated in time");
 }
 
-// -------------------- Core Processor --------------------
 async function processTool(toolName, req, res) {
   let inputDir;
   try {
@@ -115,7 +129,6 @@ async function processTool(toolName, req, res) {
     const { jobId, inputDir: idir, outputDir, toolsRoot } = makeJobDirs(toolName);
     inputDir = idir;
 
-    // Save config.json if provided
     if (settings) {
       try {
         const parsed = JSON.parse(settings);
@@ -126,7 +139,6 @@ async function processTool(toolName, req, res) {
       }
     }
 
-    // Move uploaded files to input dir
     await Promise.all(
       req.files.map(async (f, idx) => {
         const safeName = f.originalname?.replace(/[\\/]/g, "_") || `file_${idx}.pdf`;
@@ -134,10 +146,8 @@ async function processTool(toolName, req, res) {
       })
     );
 
-    // Run Python script
     await runPython({ inputDir, outputDir, toolsRoot });
 
-    // Wait for output
     const files = await waitForOutputs(outputDir);
 
     const outputs = files
@@ -147,7 +157,6 @@ async function processTool(toolName, req, res) {
         url: `/api/${toolName.toLowerCase()}/download/${jobId}/${name}`,
       }));
 
-    // Save history
     let updatedHistory = [];
     if (userId) {
       const historyEntry = new History({ userId, toolName, jobId, outputs });
@@ -163,7 +172,6 @@ async function processTool(toolName, req, res) {
     console.error(`${toolName} error:`, err);
     res.status(500).json({ error: err.message });
   } finally {
-    // Cleanup input
     if (inputDir && fs.existsSync(inputDir)) {
       await fsp.rm(inputDir, { recursive: true, force: true });
       console.log(`🗑 Deleted input folder: ${inputDir}`);
@@ -172,20 +180,21 @@ async function processTool(toolName, req, res) {
 }
 
 // -------------------- Routes --------------------
-app.post("/api/flipkart", upload.array("files", 50), (req, res) =>
-  processTool("FlipkartCropper", req, res)
-);
-app.post("/api/meesho", upload.array("files", 50), (req, res) =>
-  processTool("MeshooCropper", req, res)
-);
-app.post("/api/jiomart", upload.array("files", 50), (req, res) =>
-  processTool("JioMartCropper", req, res)
-);
+app.post("/api/:tool", upload.array("files", 50), (req, res) => {
+  const key = req.params.tool.toLowerCase();
+  const toolName = toolMap[key];
+  if (!toolName) return res.status(400).json({ error: "Unknown tool" });
+  processTool(toolName, req, res);
+});
 
-// Download output
+// Download
 app.get("/api/:tool/download/:jobId/:filename", (req, res) => {
   const { tool, jobId, filename } = req.params;
-  const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
+  const key = tool.toLowerCase();
+  const toolName = toolMap[key];
+  if (!toolName) return res.status(400).json({ error: "Unknown tool" });
+
+  const filePath = path.join(process.cwd(), "tools", toolName, "output", jobId, filename);
   if (fs.existsSync(filePath)) res.download(filePath);
   else res.status(404).json({ error: "File not found" });
 });
@@ -200,62 +209,6 @@ app.get("/api/history/:userId", async (req, res) => {
     res.json({ success: true, history: userHistory });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch history" });
-  }
-});
-
-// Admin list files
-app.get("/api/admin/files", async (_req, res) => {
-  try {
-    const toolsRoot = path.join(process.cwd(), "tools");
-    const tools = await fsp.readdir(toolsRoot);
-
-    let allFiles = [];
-    for (const tool of tools) {
-      const outputRoot = path.join(toolsRoot, tool, "output");
-      if (!fs.existsSync(outputRoot)) continue;
-
-      const jobs = await fsp.readdir(outputRoot);
-      for (const jobId of jobs) {
-        const jobDir = path.join(outputRoot, jobId);
-        if (!fs.lstatSync(jobDir).isDirectory()) continue;
-
-        const files = (await fsp.readdir(jobDir)).filter(
-          (f) => f.endsWith(".pdf") || f.endsWith(".xlsx")
-        );
-
-        files.forEach((name) => {
-          const filePath = path.join(jobDir, name);
-          const stats = fs.existsSync(filePath) ? fs.statSync(filePath) : { size: 0 };
-
-          allFiles.push({
-            tool,
-            jobId,
-            name,
-            size: stats.size,
-            url: `/api/${tool}/download/${jobId}/${name}`,
-          });
-        });
-      }
-    }
-
-    res.json({ success: true, files: allFiles });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to list admin files" });
-  }
-});
-
-// Admin delete file
-app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
-  try {
-    const { tool, jobId, filename } = req.params;
-    const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
-
-    if (!fs.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
-
-    await fsp.unlink(filePath);
-    res.json({ success: true, message: "File deleted" });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to delete file" });
   }
 });
 
