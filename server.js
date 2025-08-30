@@ -1,4 +1,4 @@
-
+// server.js
 import express from "express";
 import dotenv from "dotenv";
 import multer from "multer";
@@ -262,4 +262,3 @@ app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
 
 // -------------------- Start --------------------
 app.listen(PORT, () => console.log(`🚀 Server running at http://localhost:${PORT}`));
-ok this works fine for delete and downloadall but op panne
