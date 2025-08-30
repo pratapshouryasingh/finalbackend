@@ -17,7 +17,8 @@ const PORT = process.env.PORT || 5000;
 // ✅ Allowed origins (Vercel + Localhost)
 const allowedOrigins = [
   "https://shippinglablecropper-git-main-pratapshouryasinghs-projects.vercel.app",
-  "http://localhost:5173"
+  "http://localhost:5173",
+  "http://localhost:5000"
 ];
 
 app.use(
