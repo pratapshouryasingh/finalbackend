@@ -1,4 +1,3 @@
-// server.js
 import express from "express";
 import dotenv from "dotenv";
 import multer from "multer";
@@ -36,7 +35,9 @@ app.use(
   })
 );
 
+// -------------------- JSON & URL Encoded Limits --------------------
 app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // -------------------- MongoDB --------------------
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -81,8 +82,7 @@ function runPython({ inputDir, outputDir, toolsRoot }) {
       cwd: toolsRoot,
     });
 
-    let stdout = "",
-      stderr = "";
+    let stdout = "", stderr = "";
     child.stdout.on("data", (d) => (stdout += d.toString()));
     child.stderr.on("data", (d) => (stderr += d.toString()));
 
