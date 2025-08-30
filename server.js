@@ -118,15 +118,28 @@ async function processTool(toolName, req, res) {
     inputDir = idir;
 
     // Save config.json if provided
-    if (settings) {
-      try {
-        const parsed = JSON.parse(settings);
-        await fsp.writeFile(path.join(toolsRoot, "config.json"), JSON.stringify(parsed, null, 2));
-        console.log(`✅ ${toolName} config.json overridden`);
-      } catch (e) {
-        console.error("❌ Failed to save config.json:", e);
-      }
-    }
+  // Save config.json if provided
+if (settings) {
+  try {
+    const parsed = JSON.parse(settings);
+
+    // Ensure toolName maps correctly
+    const toolMap = {
+      flipkart: "FlipkartCropper",
+      meesho: "MeshooCropper",
+      jiomart: "JioMartCropper",
+    };
+    const properTool = toolMap[toolName.toLowerCase()] || toolName;
+
+    const configPath = path.join(process.cwd(), "tools", properTool, "config.json");
+    await fsp.writeFile(configPath, JSON.stringify(parsed, null, 2));
+
+    console.log(`✅ ${properTool} config.json overridden at ${configPath}`);
+  } catch (e) {
+    console.error("❌ Failed to save config.json:", e);
+  }
+}
+
 
     // Move uploaded files to input dir
     await Promise.all(
