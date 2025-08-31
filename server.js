@@ -15,11 +15,15 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // -------------------- CORS --------------------
-const allowedOrigins = [
+ const allowedOrigins = [
   "https://shippinglablecropper-git-main-pratapshouryasinghs-projects.vercel.app",
+  "http://localhost:5173",
+  "http://localhost:5000",
   "https://shippinglablecropper.vercel.app",
-  "https://www.shippinglabelcrop.in"
+  "https://www.shippinglabelcrop.in",   // ✅ add this
+  "https://shippinglabelcrop.in",       // ✅ bare domain
 ];
+
 
 app.use(
   cors({
