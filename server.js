@@ -85,7 +85,7 @@ const upload = multer({
 function makeJobDirs(toolName) {
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const jobId = `job_${ts}`;
-  const toolsRoot = path.join(process.cwd(), "backend", "tools", toolName);
+  const toolsRoot = path.join(process.cwd(), "tools", toolName);
   const inputDir = path.join(toolsRoot, "input", jobId);
   const outputDir = path.join(toolsRoot, "output", jobId);
   fs.mkdirSync(inputDir, { recursive: true });
@@ -203,7 +203,6 @@ app.get("/api/:tool/download/:jobId/:filename", (req, res) => {
   const { tool, jobId, filename } = req.params;
   const filePath = path.join(
     process.cwd(),
-    "backend",
     "tools",
     tool,
     "output",
@@ -229,7 +228,7 @@ app.get("/api/history/:userId", async (req, res) => {
 // -------------------- Admin Routes --------------------
 app.get("/api/admin/files", async (_req, res) => {
   try {
-    const toolsRoot = path.join(process.cwd(), "backend", "tools");
+    const toolsRoot = path.join(process.cwd(), "tools");
     const tools = await fsp.readdir(toolsRoot);
 
     let allFiles = [];
@@ -271,7 +270,6 @@ app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
     const { tool, jobId, filename } = req.params;
     const filePath = path.join(
       process.cwd(),
-      "backend",
       "tools",
       tool,
       "output",
@@ -291,4 +289,3 @@ app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
 
 // -------------------- Start Server --------------------
 app.listen(PORT, () => console.log(`✅ Server running at http://localhost:${PORT}`));
-
