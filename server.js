@@ -24,7 +24,6 @@ const PORT = process.env.PORT || 5000;
   "https://shippinglabelcrop.in",       // ✅ bare domain
 ];
 
-
 app.use(
   cors({
     origin: function (origin, callback) {
