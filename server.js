@@ -23,10 +23,10 @@ mongoose
 
 // -------------------- CORS --------------------
 const allowedOrigins = [
+  "https://shippinglablecropper.vercel.app",
   "https://shippinglablecropper-git-main-pratapshouryasinghs-projects.vercel.app",
   "http://localhost:5173",
   "http://localhost:5000",
-  "https://shippinglablecropper.vercel.app",
   "https://www.shippinglabelcrop.in",
   "https://shippinglabelcrop.in",
   "https://aws.shippinglabelcrop.in",
@@ -35,8 +35,9 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, cb) => {
-      if (!origin || allowedOrigins.includes(origin)) cb(null, true);
-      else cb(new Error("❌ Not allowed by CORS"));
+      if (!origin) return cb(null, true); // allow curl/Postman
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+      return cb(new Error(`❌ Not allowed by CORS: ${origin}`));
     },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -44,6 +45,7 @@ app.use(
   })
 );
 
+// -------------------- Middleware --------------------
 app.use(express.json());
 
 // -------------------- Health Routes --------------------
