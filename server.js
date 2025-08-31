@@ -1,3 +1,4 @@
+// -------------------- Imports --------------------
 import express from "express";
 import dotenv from "dotenv";
 import multer from "multer";
@@ -13,6 +14,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const PYTHON = process.env.PYTHON_BIN || "python3"; // fallback
 
 // -------------------- MongoDB --------------------
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -35,7 +37,7 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, cb) => {
-      if (!origin) return cb(null, true); // allow curl/Postman
+      if (!origin) return cb(null, true); // allow Postman/curl
       if (allowedOrigins.includes(origin)) return cb(null, true);
       return cb(new Error(`❌ Not allowed by CORS: ${origin}`));
     },
@@ -45,18 +47,10 @@ app.use(
   })
 );
 
-app.options("*", cors({
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
-    if (allowedOrigins.includes(origin)) return cb(null, true);
-    return cb(new Error(`❌ Not allowed by CORS: ${origin}`));
-  },
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true
-}));
+// Preflight
+app.options("*", cors());
 
-// Optional: Force headers for all responses (extra safety)
+// Extra safety
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", req.headers.origin || "*");
   res.header("Access-Control-Allow-Credentials", "true");
@@ -91,15 +85,13 @@ const upload = multer({
 function makeJobDirs(toolName) {
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const jobId = `job_${ts}`;
-  const toolsRoot = path.join(process.cwd(), "tools", toolName);
+  const toolsRoot = path.join(process.cwd(), "backend", "tools", toolName);
   const inputDir = path.join(toolsRoot, "input", jobId);
   const outputDir = path.join(toolsRoot, "output", jobId);
   fs.mkdirSync(inputDir, { recursive: true });
   fs.mkdirSync(outputDir, { recursive: true });
   return { jobId, inputDir, outputDir, toolsRoot };
 }
-
-const PYTHON = process.env.PYTHON_BIN || "python3"; // ✅ fallback
 
 function runPython({ inputDir, outputDir, toolsRoot }) {
   return new Promise((resolve) => {
@@ -122,12 +114,12 @@ function runPython({ inputDir, outputDir, toolsRoot }) {
   });
 }
 
-async function waitForOutputs(dir, timeoutMs = 60000) {
+async function waitForOutputs(dir, timeoutMs = 120000) { // ⏱ increased timeout
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const files = await fsp.readdir(dir);
     if (files.length > 0) return files;
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error("No output files generated within timeout");
 }
@@ -157,7 +149,7 @@ async function processTool(toolName, req, res) {
       }
     }
 
-    // Move files into input dir
+    // Move uploaded files
     await Promise.all(
       req.files.map(async (f, i) => {
         const safe = f.originalname?.replace(/[\\/]/g, "_") || `file_${i}.pdf`;
@@ -165,7 +157,7 @@ async function processTool(toolName, req, res) {
       })
     );
 
-    // Run python tool
+    // Run Python
     await runPython({ inputDir, outputDir, toolsRoot });
 
     // Collect outputs
@@ -200,7 +192,7 @@ app.post("/api/flipkart", upload.array("files", 50), (req, res) =>
   processTool("FlipkartCropper", req, res)
 );
 app.post("/api/meesho", upload.array("files", 50), (req, res) =>
-  processTool("MeeshoCropper", req, res)
+  processTool("MeshooCropper", req, res)
 );
 app.post("/api/jiomart", upload.array("files", 50), (req, res) =>
   processTool("JioMartCropper", req, res)
@@ -209,7 +201,15 @@ app.post("/api/jiomart", upload.array("files", 50), (req, res) =>
 // -------------------- Download Route --------------------
 app.get("/api/:tool/download/:jobId/:filename", (req, res) => {
   const { tool, jobId, filename } = req.params;
-  const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
+  const filePath = path.join(
+    process.cwd(),
+    "backend",
+    "tools",
+    tool,
+    "output",
+    jobId,
+    filename
+  );
   if (fs.existsSync(filePath)) return res.download(filePath);
   res.status(404).json({ error: "File not found" });
 });
@@ -229,7 +229,7 @@ app.get("/api/history/:userId", async (req, res) => {
 // -------------------- Admin Routes --------------------
 app.get("/api/admin/files", async (_req, res) => {
   try {
-    const toolsRoot = path.join(process.cwd(), "tools");
+    const toolsRoot = path.join(process.cwd(), "backend", "tools");
     const tools = await fsp.readdir(toolsRoot);
 
     let allFiles = [];
@@ -269,7 +269,15 @@ app.get("/api/admin/files", async (_req, res) => {
 app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
   try {
     const { tool, jobId, filename } = req.params;
-    const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
+    const filePath = path.join(
+      process.cwd(),
+      "backend",
+      "tools",
+      tool,
+      "output",
+      jobId,
+      filename
+    );
 
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
 
@@ -283,3 +291,4 @@ app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
 
 // -------------------- Start Server --------------------
 app.listen(PORT, () => console.log(`✅ Server running at http://localhost:${PORT}`));
+
