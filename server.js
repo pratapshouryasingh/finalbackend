@@ -99,10 +99,12 @@ function makeJobDirs(toolName) {
   return { jobId, inputDir, outputDir, toolsRoot };
 }
 
+const PYTHON = process.env.PYTHON_BIN || "python3"; // ✅ fallback
+
 function runPython({ inputDir, outputDir, toolsRoot }) {
   return new Promise((resolve) => {
     const mainPy = path.join(toolsRoot, "main.py");
-    const child = spawn("python", [mainPy, "--input", inputDir, "--output", outputDir], {
+    const child = spawn(PYTHON, [mainPy, "--input", inputDir, "--output", outputDir], {
       cwd: toolsRoot,
     });
 
