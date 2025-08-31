@@ -8,18 +8,29 @@ import fs from "fs";
 import fsp from "fs/promises";
 import { spawn } from "child_process";
 import mongoose from "mongoose";
+import { fileURLToPath } from "url";
 import History from "./historyModel.js";
 
+// -------------------- Env --------------------
 dotenv.config();
-
 const app = express();
 const PORT = process.env.PORT || 5000;
-const PYTHON = process.env.PYTHON_BIN || "python3"; // fallback
+const PYTHON = process.env.PYTHON_BIN || "python3"; // e.g. /usr/bin/python3 or /home/ubuntu/venv/bin/python
+
+// Resolve project root robustly (independent of where PM2/systemd starts the app)
+const __filename = fileURLToPath(import.meta.url);
+const PROJECT_ROOT = path.dirname(__filename);
 
 // -------------------- MongoDB --------------------
 const MONGODB_URI = process.env.MONGODB_URI;
 mongoose
-  .connect(MONGODB_URI)
+  .connect(MONGODB_URI, {
+    serverSelectionTimeoutMS: 20000,
+    socketTimeoutMS: 120000,
+    // keep alive to avoid idle disconnects
+    keepAlive: true,
+    keepAliveInitialDelay: 300000,
+  })
   .then(() => console.log("🟢 Connected to MongoDB Atlas"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
 
@@ -42,7 +53,7 @@ app.use(
       return cb(new Error(`❌ Not allowed by CORS: ${origin}`));
     },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Origin", "Content-Type", "Accept", "Authorization"],
     credentials: true,
   })
 );
@@ -50,7 +61,7 @@ app.use(
 // Preflight
 app.options("*", cors());
 
-// Extra safety
+// Extra safety (mirrors via proxy too)
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", req.headers.origin || "*");
   res.header("Access-Control-Allow-Credentials", "true");
@@ -58,23 +69,25 @@ app.use((req, res, next) => {
     "Access-Control-Allow-Headers",
     "Origin, X-Requested-With, Content-Type, Accept, Authorization"
   );
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   next();
 });
 
 // -------------------- Middleware --------------------
-app.use(express.json());
+app.use(express.json({ limit: "50mb" })); // align with upload size
+app.set("trust proxy", true);
 
 // -------------------- Health Routes --------------------
 app.get("/health", (_req, res) => res.status(200).json({ status: "ok" }));
 app.get("/", (_req, res) => res.status(200).send("✅ Server is running"));
 
 // -------------------- Multer --------------------
-const TMP_UPLOADS = path.join(process.cwd(), "tmp_uploads");
+const TMP_UPLOADS = path.join(PROJECT_ROOT, "tmp_uploads");
 fs.mkdirSync(TMP_UPLOADS, { recursive: true });
 
 const upload = multer({
   dest: TMP_UPLOADS,
-  limits: { fileSize: 50 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
   fileFilter: (_req, file, cb) =>
     file.mimetype === "application/pdf"
       ? cb(null, true)
@@ -85,7 +98,7 @@ const upload = multer({
 function makeJobDirs(toolName) {
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const jobId = `job_${ts}`;
-  const toolsRoot = path.join(process.cwd(), "tools", toolName);
+  const toolsRoot = path.join(PROJECT_ROOT, "tools", toolName); // <<< stable path
   const inputDir = path.join(toolsRoot, "input", jobId);
   const outputDir = path.join(toolsRoot, "output", jobId);
   fs.mkdirSync(inputDir, { recursive: true });
@@ -96,25 +109,35 @@ function makeJobDirs(toolName) {
 function runPython({ inputDir, outputDir, toolsRoot }) {
   return new Promise((resolve) => {
     const mainPy = path.join(toolsRoot, "main.py");
+
     const child = spawn(PYTHON, [mainPy, "--input", inputDir, "--output", outputDir], {
       cwd: toolsRoot,
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: "1", // flush prints
+      },
     });
 
     let stdout = "", stderr = "";
     child.stdout.on("data", (d) => (stdout += d.toString()));
     child.stderr.on("data", (d) => (stderr += d.toString()));
 
+    child.on("error", (err) => {
+      console.error("❌ spawn error:", err);
+      resolve({ stdout: "", stderr: String(err), warn: true });
+    });
+
     child.on("close", (code) => {
       if (code === 0) resolve({ stdout });
       else {
         console.warn(`⚠ Python exited with code ${code}: ${stderr}`);
-        resolve({ stdout, warn: true });
+        resolve({ stdout, warn: true, stderr });
       }
     });
   });
 }
 
-async function waitForOutputs(dir, timeoutMs = 120000) { // ⏱ increased timeout
+async function waitForOutputs(dir, timeoutMs = 180000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const files = await fsp.readdir(dir);
@@ -135,10 +158,10 @@ async function processTool(toolName, req, res) {
     const { jobId, inputDir: idir, outputDir, toolsRoot } = makeJobDirs(toolName);
     inputDir = idir;
 
-    // Override config.json if settings provided
+    // Optional override config.json
     if (settings) {
       try {
-        const parsed = JSON.parse(settings);
+        const parsed = typeof settings === "string" ? JSON.parse(settings) : settings;
         await fsp.writeFile(
           path.join(toolsRoot, "config.json"),
           JSON.stringify(parsed, null, 2)
@@ -158,7 +181,8 @@ async function processTool(toolName, req, res) {
     );
 
     // Run Python
-    await runPython({ inputDir, outputDir, toolsRoot });
+    const py = await runPython({ inputDir, outputDir, toolsRoot });
+    if (py.warn) console.warn(`[${toolName}] python warn:\n`, py.stderr || py.stdout);
 
     // Collect outputs
     const files = await waitForOutputs(outputDir);
@@ -192,7 +216,7 @@ app.post("/api/flipkart", upload.array("files", 50), (req, res) =>
   processTool("FlipkartCropper", req, res)
 );
 app.post("/api/meesho", upload.array("files", 50), (req, res) =>
-  processTool("MeshooCropper", req, res)
+  processTool("MeeshoCropper", req, res) // <-- fixed spelling
 );
 app.post("/api/jiomart", upload.array("files", 50), (req, res) =>
   processTool("JioMartCropper", req, res)
@@ -201,14 +225,7 @@ app.post("/api/jiomart", upload.array("files", 50), (req, res) =>
 // -------------------- Download Route --------------------
 app.get("/api/:tool/download/:jobId/:filename", (req, res) => {
   const { tool, jobId, filename } = req.params;
-  const filePath = path.join(
-    process.cwd(),
-    "tools",
-    tool,
-    "output",
-    jobId,
-    filename
-  );
+  const filePath = path.join(PROJECT_ROOT, "tools", tool, "output", jobId, filename);
   if (fs.existsSync(filePath)) return res.download(filePath);
   res.status(404).json({ error: "File not found" });
 });
@@ -228,7 +245,7 @@ app.get("/api/history/:userId", async (req, res) => {
 // -------------------- Admin Routes --------------------
 app.get("/api/admin/files", async (_req, res) => {
   try {
-    const toolsRoot = path.join(process.cwd(), "tools");
+    const toolsRoot = path.join(PROJECT_ROOT, "tools");
     const tools = await fsp.readdir(toolsRoot);
 
     let allFiles = [];
@@ -268,14 +285,7 @@ app.get("/api/admin/files", async (_req, res) => {
 app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
   try {
     const { tool, jobId, filename } = req.params;
-    const filePath = path.join(
-      process.cwd(),
-      "tools",
-      tool,
-      "output",
-      jobId,
-      filename
-    );
+    const filePath = path.join(PROJECT_ROOT, "tools", tool, "output", jobId, filename);
 
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
 
@@ -287,5 +297,20 @@ app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
   }
 });
 
+// -------------------- Stability: process guards --------------------
+process.on("unhandledRejection", (reason) => {
+  console.error("🛑 Unhandled Rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("🛑 Uncaught Exception:", err);
+});
+const shutdown = async () => {
+  console.log("👋 Shutting down...");
+  try { await mongoose.connection.close(); } catch {}
+  process.exit(0);
+};
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+
 // -------------------- Start Server --------------------
-app.listen(PORT, () => console.log(`✅ Server running at http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
