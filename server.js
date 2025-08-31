@@ -6,23 +6,22 @@ import path from "path";
 import fs from "fs";
 import fsp from "fs/promises";
 import { spawn } from "child_process";
-import mongoose from "mongoose"; // 📦 Import Mongoose
-import History from "./historyModel.js"; // 📦 Import the new model
+import mongoose from "mongoose";
+import History from "./historyModel.js";
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// 🔗 Connect to MongoDB
+// -------------------- MongoDB --------------------
 const MONGODB_URI = process.env.MONGODB_URI;
-
 mongoose
   .connect(MONGODB_URI)
   .then(() => console.log("🟢 Connected to MongoDB Atlas"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
 
-// --- CORS configuration ---
+// -------------------- CORS --------------------
 const allowedOrigins = [
   "https://shippinglablecropper-git-main-pratapshouryasinghs-projects.vercel.app",
   "http://localhost:5173",
@@ -30,49 +29,41 @@ const allowedOrigins = [
   "https://shippinglablecropper.vercel.app",
   "https://www.shippinglabelcrop.in",
   "https://shippinglabelcrop.in",
-  "https://aws.shippinglabelcrop.in", // ✅ added AWS subdomain
+  "https://aws.shippinglabelcrop.in",
 ];
 
 app.use(
   cors({
-    origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
+    origin: (origin, cb) => {
+      if (!origin || allowedOrigins.includes(origin)) cb(null, true);
+      else cb(new Error("❌ Not allowed by CORS"));
     },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true, // if using cookies/sessions
+    credentials: true,
   })
 );
 
 app.use(express.json());
 
-// --- Health check routes for EB / ALB ---
-app.get("/health", (_req, res) => {
-  res.status(200).json({ status: "ok" });
-});
+// -------------------- Health Routes --------------------
+app.get("/health", (_req, res) => res.status(200).json({ status: "ok" }));
+app.get("/", (_req, res) => res.status(200).send("✅ Server is running"));
 
-app.get("/", (_req, res) => {
-  res.status(200).send("Server is running ✅");
-});
-
-// Temporary upload folder
+// -------------------- Multer --------------------
 const TMP_UPLOADS = path.join(process.cwd(), "tmp_uploads");
 fs.mkdirSync(TMP_UPLOADS, { recursive: true });
 
 const upload = multer({
   dest: TMP_UPLOADS,
   limits: { fileSize: 50 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    if (file.mimetype === "application/pdf") cb(null, true);
-    else cb(new Error("Only PDF files allowed"));
-  },
+  fileFilter: (_req, file, cb) =>
+    file.mimetype === "application/pdf"
+      ? cb(null, true)
+      : cb(new Error("Only PDF files allowed")),
 });
 
-// Create per-job folders
+// -------------------- Helpers --------------------
 function makeJobDirs(toolName) {
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const jobId = `job_${ts}`;
@@ -84,17 +75,14 @@ function makeJobDirs(toolName) {
   return { jobId, inputDir, outputDir, toolsRoot };
 }
 
-// Run Python tool
 function runPython({ inputDir, outputDir, toolsRoot }) {
   return new Promise((resolve) => {
     const mainPy = path.join(toolsRoot, "main.py");
-
     const child = spawn("python", [mainPy, "--input", inputDir, "--output", outputDir], {
       cwd: toolsRoot,
     });
 
-    let stdout = "",
-      stderr = "";
+    let stdout = "", stderr = "";
     child.stdout.on("data", (d) => (stdout += d.toString()));
     child.stderr.on("data", (d) => (stderr += d.toString()));
 
@@ -108,57 +96,54 @@ function runPython({ inputDir, outputDir, toolsRoot }) {
   });
 }
 
-// Wait for output files (PDF + Excel)
-async function waitForOutputs(dir, timeoutMs = 1000000) {
+async function waitForOutputs(dir, timeoutMs = 60000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const files = await fsp.readdir(dir);
     if (files.length > 0) return files;
     await new Promise((r) => setTimeout(r, 500));
   }
-  const errorPath = path.join(dir, "error_pages.pdf");
-  if (fs.existsSync(errorPath)) return ["error_pages.pdf"];
   throw new Error("No output files generated within timeout");
 }
 
-// Generic processor
+// -------------------- Generic Processor --------------------
 async function processTool(toolName, req, res) {
   let inputDir;
   try {
-    const { userId, settings } = req.body; // 📦 Get userId from request
+    const { userId, settings } = req.body;
     if (!req.files || req.files.length === 0)
       return res.status(400).json({ error: "No files uploaded" });
 
     const { jobId, inputDir: idir, outputDir, toolsRoot } = makeJobDirs(toolName);
     inputDir = idir;
 
-    // Override config if settings sent
+    // Override config.json if settings provided
     if (settings) {
       try {
-        const parsedSettings = JSON.parse(settings);
-        const configPath = path.join(toolsRoot, "config.json");
-        await fsp.writeFile(configPath, JSON.stringify(parsedSettings, null, 2));
-        console.log(`✅ ${toolName} config.json overridden:`, parsedSettings);
+        const parsed = JSON.parse(settings);
+        await fsp.writeFile(
+          path.join(toolsRoot, "config.json"),
+          JSON.stringify(parsed, null, 2)
+        );
+        console.log(`✅ ${toolName} config.json updated`);
       } catch (e) {
-        console.error(`❌ Failed to override config.json:`, e);
+        console.error("❌ config.json parse error:", e);
       }
     }
 
-    // Move uploaded files into job input
+    // Move files into input dir
     await Promise.all(
-      req.files.map(async (f, idx) => {
-        const safeName = f.originalname?.replace(/[\\/]/g, "_") || `file_${idx}.pdf`;
-        await fsp.rename(f.path, path.join(inputDir, safeName));
+      req.files.map(async (f, i) => {
+        const safe = f.originalname?.replace(/[\\/]/g, "_") || `file_${i}.pdf`;
+        await fsp.rename(f.path, path.join(inputDir, safe));
       })
     );
 
-    // Run Python
+    // Run python tool
     await runPython({ inputDir, outputDir, toolsRoot });
 
-    // Wait for outputs
+    // Collect outputs
     const files = await waitForOutputs(outputDir);
-
-    // Return both PDF and Excel files separately
     const outputs = files
       .filter((f) => f.endsWith(".pdf") || f.endsWith(".xlsx"))
       .map((name) => ({
@@ -166,80 +151,62 @@ async function processTool(toolName, req, res) {
         url: `/api/${toolName.toLowerCase()}/download/${jobId}/${name}`,
       }));
 
-    // 💾 Save history to MongoDB and fetch updated history
-    let updatedHistory = [];
+    // Save history
+    let history = [];
     if (userId) {
-      const historyEntry = new History({
-        userId,
-        toolName,
-        jobId,
-        outputs,
-      });
-      await historyEntry.save();
-
-      updatedHistory = await History.find({ userId })
-        .sort({ timestamp: -1 })
-        .limit(10);
+      await new History({ userId, toolName, jobId, outputs }).save();
+      history = await History.find({ userId }).sort({ timestamp: -1 }).limit(10);
     }
 
-    res.json({ success: true, tool: toolName, jobId, outputs, history: updatedHistory });
+    res.json({ success: true, tool: toolName, jobId, outputs, history });
   } catch (err) {
     console.error(`${toolName} error:`, err);
     res.status(500).json({ error: String(err.message || err) });
   } finally {
-    // Cleanup input folder completely after processing
     if (inputDir && fs.existsSync(inputDir)) {
-      try {
-        await fsp.rm(inputDir, { recursive: true, force: true });
-        console.log(`🗑 Deleted input folder: ${inputDir}`);
-      } catch (e) {
-        console.error(`❌ Failed to delete input folder: ${inputDir}`, e);
-      }
+      await fsp.rm(inputDir, { recursive: true, force: true });
     }
   }
 }
 
-// Processing routes
+// -------------------- Processing Routes --------------------
 app.post("/api/flipkart", upload.array("files", 50), (req, res) =>
   processTool("FlipkartCropper", req, res)
 );
 app.post("/api/meesho", upload.array("files", 50), (req, res) =>
-  processTool("MeshooCropper", req, res)
+  processTool("MeeshoCropper", req, res)
 );
 app.post("/api/jiomart", upload.array("files", 50), (req, res) =>
   processTool("JioMartCropper", req, res)
 );
 
-// 📥 Download route
+// -------------------- Download Route --------------------
 app.get("/api/:tool/download/:jobId/:filename", (req, res) => {
   const { tool, jobId, filename } = req.params;
   const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
-  if (fs.existsSync(filePath)) res.download(filePath);
-  else res.status(404).json({ error: "File not found" });
+  if (fs.existsSync(filePath)) return res.download(filePath);
+  res.status(404).json({ error: "File not found" });
 });
 
-// 📚 User history route
+// -------------------- User History --------------------
 app.get("/api/history/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
-    const userHistory = await History.find({ userId })
-      .sort({ timestamp: -1 })
-      .limit(10);
-    res.json({ success: true, history: userHistory });
+    const history = await History.find({ userId }).sort({ timestamp: -1 });
+    res.json({ success: true, history });
   } catch (err) {
-    console.error("❌ Failed to fetch user history:", err);
+    console.error("❌ History fetch error:", err);
     res.status(500).json({ error: "Failed to fetch user history" });
   }
 });
 
-// 🔹 Admin route - list all output files across tools
-app.get("/api/admin/files", async (req, res) => {
+// -------------------- Admin Routes --------------------
+app.get("/api/admin/files", async (_req, res) => {
   try {
     const toolsRoot = path.join(process.cwd(), "tools");
     const tools = await fsp.readdir(toolsRoot);
 
     let allFiles = [];
-
     for (const tool of tools) {
       const outputRoot = path.join(toolsRoot, tool, "output");
       if (!fs.existsSync(outputRoot)) continue;
@@ -256,7 +223,6 @@ app.get("/api/admin/files", async (req, res) => {
         files.forEach((name) => {
           const filePath = path.join(jobDir, name);
           const stats = fs.existsSync(filePath) ? fs.statSync(filePath) : { size: 0 };
-
           allFiles.push({
             tool,
             jobId,
@@ -267,7 +233,6 @@ app.get("/api/admin/files", async (req, res) => {
         });
       }
     }
-
     res.json({ success: true, files: allFiles });
   } catch (err) {
     console.error("❌ Admin file list error:", err);
@@ -275,30 +240,20 @@ app.get("/api/admin/files", async (req, res) => {
   }
 });
 
-// 🔹 Admin route - delete a file
 app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
   try {
     const { tool, jobId, filename } = req.params;
-    const filePath = path.join(
-      process.cwd(),
-      "tools",
-      tool,
-      "output",
-      jobId,
-      filename
-    );
+    const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
 
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: "File not found" });
-    }
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
 
     await fsp.unlink(filePath);
-    console.log(`🗑 Deleted file: ${filePath}`);
     res.json({ success: true, message: "File deleted" });
   } catch (err) {
-    console.error("❌ Error deleting file:", err);
+    console.error("❌ Delete error:", err);
     res.status(500).json({ error: "Failed to delete file" });
   }
 });
 
+// -------------------- Start Server --------------------
 app.listen(PORT, () => console.log(`✅ Server running at http://localhost:${PORT}`));
