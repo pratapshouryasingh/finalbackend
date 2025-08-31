@@ -32,6 +32,7 @@ const allowedOrigins = [
   "https://aws.shippinglabelcrop.in",
 ];
 
+// Standard CORS middleware
 app.use(
   cors({
     origin: (origin, cb) => {
@@ -45,8 +46,31 @@ app.use(
   })
 );
 
+// Handle preflight OPTIONS requests for all routes
+app.options("*", cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error(`❌ Not allowed by CORS: ${origin}`));
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true
+}));
+
 // -------------------- Middleware --------------------
 app.use(express.json());
+
+// Optional: Force headers for all responses (extra safety)
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", req.headers.origin || "*");
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+  );
+  next();
+});
 
 // -------------------- Health Routes --------------------
 app.get("/health", (_req, res) => res.status(200).json({ status: "ok" }));
@@ -259,3 +283,4 @@ app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
 
 // -------------------- Start Server --------------------
 app.listen(PORT, () => console.log(`✅ Server running at http://localhost:${PORT}`));
+
