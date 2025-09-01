@@ -192,6 +192,13 @@ async function processTool(toolName, req, res) {
   }
 }
 
+// --- Tool name map ---
+const TOOL_MAP = {
+  flipkart: "FlipkartCropper",
+  meesho: "MeshooCropper",
+  jiomart: "JioMartCropper",
+};
+
 // Routes
 app.post("/api/flipkart", upload.array("files", 50), (req, res) =>
   processTool("FlipkartCropper", req, res)
@@ -206,7 +213,9 @@ app.post("/api/jiomart", upload.array("files", 50), (req, res) =>
 // Download route
 app.get("/api/:tool/download/:jobId/:filename", (req, res) => {
   const { tool, jobId, filename } = req.params;
-  const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
+  const toolFolder = TOOL_MAP[tool.toLowerCase()] || tool;
+
+  const filePath = path.join(process.cwd(), "tools", toolFolder, "output", jobId, filename);
   if (fs.existsSync(filePath)) res.download(filePath);
   else res.status(404).json({ error: "File not found" });
 });
@@ -247,12 +256,16 @@ app.get("/api/admin/files", async (req, res) => {
           const filePath = path.join(jobDir, name);
           const stats = fs.existsSync(filePath) ? fs.statSync(filePath) : { size: 0 };
 
+          // reverse map folder name → API route
+          const apiTool =
+            Object.keys(TOOL_MAP).find((k) => TOOL_MAP[k] === tool) || tool;
+
           allFiles.push({
             tool,
             jobId,
             name,
             size: stats.size,
-            url: `/api/${tool}/download/${jobId}/${name}`,
+            url: `/api/${apiTool}/download/${jobId}/${name}`,
           });
         });
       }
@@ -269,7 +282,9 @@ app.get("/api/admin/files", async (req, res) => {
 app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
   try {
     const { tool, jobId, filename } = req.params;
-    const filePath = path.join(process.cwd(), "tools", tool, "output", jobId, filename);
+    const toolFolder = TOOL_MAP[tool.toLowerCase()] || tool;
+
+    const filePath = path.join(process.cwd(), "tools", toolFolder, "output", jobId, filename);
 
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: "File not found" });
