@@ -14,14 +14,14 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// 🔗 Connect to MongoDB
+// -------------------- MongoDB --------------------
 const MONGODB_URI = process.env.MONGODB_URI;
 mongoose
   .connect(MONGODB_URI)
   .then(() => console.log("🟢 Connected to MongoDB Atlas"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
 
-// --- CORS setup ---
+// -------------------- CORS --------------------
 const allowedOrigins = [
   "https://shippinglablecropper.vercel.app",
   "https://shippinglablecropper-git-main-pratapshouryasinghs-projects.vercel.app",
@@ -35,11 +35,8 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
+      if (!origin || allowedOrigins.includes(origin)) callback(null, true);
+      else callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -49,15 +46,11 @@ app.use(
 
 app.use(express.json());
 
-// --- Health check ---
-app.get("/health", (_req, res) => {
-  res.status(200).json({ status: "ok" });
-});
-app.get("/", (_req, res) => {
-  res.status(200).send("Server is running ✅");
-});
+// -------------------- Health --------------------
+app.get("/health", (_req, res) => res.json({ status: "ok" }));
+app.get("/", (_req, res) => res.send("Server is running ✅"));
 
-// Temporary upload folder
+// -------------------- Multer --------------------
 const TMP_UPLOADS = path.join(process.cwd(), "tmp_uploads");
 fs.mkdirSync(TMP_UPLOADS, { recursive: true });
 
@@ -70,18 +63,18 @@ const upload = multer({
   },
 });
 
-// --- Tool name map ---
+// -------------------- Tool Map --------------------
 const TOOL_MAP = {
   flipkart: "FlipkartCropper",
   meesho: "MeshooCropper",
   jiomart: "JioMartCropper",
 };
 
-// Create per-job folders
+// -------------------- Helpers --------------------
 function makeJobDirs(toolName) {
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const jobId = `job_${ts}`;
-  const toolsRoot = path.join(process.cwd(), "tools", toolName);
+  const toolsRoot = path.join(process.cwd(), "backend", "tools", toolName);
   const inputDir = path.join(toolsRoot, "input", jobId);
   const outputDir = path.join(toolsRoot, "output", jobId);
   fs.mkdirSync(inputDir, { recursive: true });
@@ -89,7 +82,6 @@ function makeJobDirs(toolName) {
   return { jobId, inputDir, outputDir, toolsRoot };
 }
 
-// Run Python tool
 function runPython({ inputDir, outputDir, toolsRoot }) {
   return new Promise((resolve) => {
     const mainPy = path.join(toolsRoot, "main.py");
@@ -99,6 +91,8 @@ function runPython({ inputDir, outputDir, toolsRoot }) {
     if (fs.existsSync(configPath)) {
       args.push("--config", configPath);
     }
+
+    console.log("🚀 Running Python:", { mainPy, args });
 
     const child = spawn("python3", [mainPy, ...args], { cwd: toolsRoot });
 
@@ -117,7 +111,6 @@ function runPython({ inputDir, outputDir, toolsRoot }) {
   });
 }
 
-// Wait for output files (PDF + Excel)
 async function waitForOutputs(dir, timeoutMs = 60000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -130,30 +123,37 @@ async function waitForOutputs(dir, timeoutMs = 60000) {
   throw new Error("No output files generated within timeout");
 }
 
-// Generic processor
+// -------------------- Core Processor --------------------
 async function processTool(toolName, req, res) {
   let inputDir;
   try {
     const { userId, settings } = req.body;
-    if (!req.files || req.files.length === 0)
+    if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: "No files uploaded" });
+    }
 
     const { jobId, inputDir: idir, outputDir, toolsRoot } = makeJobDirs(toolName);
     inputDir = idir;
 
-    // Job-specific config
+    // --- Config step ---
+    const configPath = path.join(outputDir, "config.json");
     if (settings) {
       try {
         const parsedSettings = JSON.parse(settings);
-        const configPath = path.join(outputDir, "config.json");
         await fsp.writeFile(configPath, JSON.stringify(parsedSettings, null, 2));
-        console.log(`✅ ${toolName} job-specific config.json created:`, parsedSettings);
+        console.log(`✅ ${toolName} config.json updated:`, parsedSettings);
       } catch (e) {
-        console.error(`❌ Failed to create job config.json:`, e);
+        console.error(`❌ Failed to write job config.json:`, e);
+      }
+    } else {
+      const defaultConfig = path.join(toolsRoot, "config.json");
+      if (fs.existsSync(defaultConfig)) {
+        await fsp.copyFile(defaultConfig, configPath);
+        console.log(`ℹ️ Used default config.json for ${toolName}`);
       }
     }
 
-    // Move uploaded files into job input
+    // --- Move uploads ---
     await Promise.all(
       req.files.map(async (f, idx) => {
         const safeName = f.originalname?.replace(/[\\/]/g, "_") || `file_${idx}.pdf`;
@@ -161,26 +161,22 @@ async function processTool(toolName, req, res) {
       })
     );
 
-    // Run Python
+    // --- Run Python ---
     await runPython({ inputDir, outputDir, toolsRoot });
 
-    // Wait for outputs
+    // --- Wait for outputs ---
     const files = await waitForOutputs(outputDir);
 
-    // Return both PDF and Excel
     const outputs = files
       .filter((f) => f.endsWith(".pdf") || f.endsWith(".xlsx"))
       .map((name) => {
         const apiTool =
           Object.keys(TOOL_MAP).find((k) => TOOL_MAP[k] === toolName) ||
           toolName.toLowerCase();
-        return {
-          name,
-          url: `/api/${apiTool}/download/${jobId}/${name}`,
-        };
+        return { name, url: `/api/${apiTool}/download/${jobId}/${name}` };
       });
 
-    // Save history
+    // --- Save history ---
     let updatedHistory = [];
     if (userId) {
       const historyEntry = new History({ userId, toolName, jobId, outputs });
@@ -204,7 +200,7 @@ async function processTool(toolName, req, res) {
   }
 }
 
-// Routes
+// -------------------- Routes --------------------
 app.post("/api/flipkart", upload.array("files", 50), (req, res) =>
   processTool("FlipkartCropper", req, res)
 );
@@ -215,14 +211,13 @@ app.post("/api/jiomart", upload.array("files", 50), (req, res) =>
   processTool("JioMartCropper", req, res)
 );
 
-// --- Enhanced Download route with better logging ---
+// --- Download route ---
 app.get("/api/:tool/download/:jobId/:filename", (req, res) => {
   const { tool, jobId, filename } = req.params;
   const toolFolder = TOOL_MAP[tool.toLowerCase()] || tool;
-
-  // Full absolute path (important for AWS/EC2/Render)
   const filePath = path.join(
     process.cwd(),
+    "backend",
     "tools",
     toolFolder,
     "output",
@@ -240,16 +235,12 @@ app.get("/api/:tool/download/:jobId/:filename", (req, res) => {
   res.download(filePath, filename, (err) => {
     if (err) {
       console.error("❌ Error during download:", err);
-      if (!res.headersSent) {
-        res.status(500).json({ error: "Download failed" });
-      }
-    } else {
-      console.log("✅ File sent successfully:", filePath);
-    }
+      if (!res.headersSent) res.status(500).json({ error: "Download failed" });
+    } else console.log("✅ File sent:", filePath);
   });
 });
 
-// User history
+// --- User history ---
 app.get("/api/history/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -261,10 +252,10 @@ app.get("/api/history/:userId", async (req, res) => {
   }
 });
 
-// Admin - list all files
+// --- Admin list files ---
 app.get("/api/admin/files", async (req, res) => {
   try {
-    const toolsRoot = path.join(process.cwd(), "tools");
+    const toolsRoot = path.join(process.cwd(), "backend", "tools");
     const tools = await fsp.readdir(toolsRoot);
 
     let allFiles = [];
@@ -284,11 +275,8 @@ app.get("/api/admin/files", async (req, res) => {
         files.forEach((name) => {
           const filePath = path.join(jobDir, name);
           const stats = fs.existsSync(filePath) ? fs.statSync(filePath) : { size: 0 };
-
-          // reverse map folder name → API route
           const apiTool =
             Object.keys(TOOL_MAP).find((k) => TOOL_MAP[k] === tool) || tool.toLowerCase();
-
           allFiles.push({
             tool,
             jobId,
@@ -299,7 +287,6 @@ app.get("/api/admin/files", async (req, res) => {
         });
       }
     }
-
     res.json({ success: true, files: allFiles });
   } catch (err) {
     console.error("❌ Admin file list error:", err);
@@ -307,13 +294,20 @@ app.get("/api/admin/files", async (req, res) => {
   }
 });
 
-// Admin - delete file
+// --- Admin delete file ---
 app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
   try {
     const { tool, jobId, filename } = req.params;
     const toolFolder = TOOL_MAP[tool.toLowerCase()] || tool;
-
-    const filePath = path.join(process.cwd(), "tools", toolFolder, "output", jobId, filename);
+    const filePath = path.join(
+      process.cwd(),
+      "backend",
+      "tools",
+      toolFolder,
+      "output",
+      jobId,
+      filename
+    );
 
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: "File not found" });
@@ -328,4 +322,6 @@ app.delete("/api/admin/files/:tool/:jobId/:filename", async (req, res) => {
   }
 });
 
+// -------------------- Start --------------------
 app.listen(PORT, () => console.log(`✅ Server running at http://localhost:${PORT}`));
+
