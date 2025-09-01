@@ -70,6 +70,13 @@ const upload = multer({
   },
 });
 
+// --- Tool name map ---
+const TOOL_MAP = {
+  flipkart: "FlipkartCropper",
+  meesho: "MeshooCropper",
+  jiomart: "JioMartCropper",
+};
+
 // Create per-job folders
 function makeJobDirs(toolName) {
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
@@ -163,10 +170,15 @@ async function processTool(toolName, req, res) {
     // Return both PDF and Excel
     const outputs = files
       .filter((f) => f.endsWith(".pdf") || f.endsWith(".xlsx"))
-      .map((name) => ({
-        name,
-        url: `/api/${toolName.toLowerCase()}/download/${jobId}/${name}`,
-      }));
+      .map((name) => {
+        const apiTool =
+          Object.keys(TOOL_MAP).find((k) => TOOL_MAP[k] === toolName) ||
+          toolName.toLowerCase();
+        return {
+          name,
+          url: `/api/${apiTool}/download/${jobId}/${name}`,
+        };
+      });
 
     // Save history
     let updatedHistory = [];
@@ -191,13 +203,6 @@ async function processTool(toolName, req, res) {
     }
   }
 }
-
-// --- Tool name map ---
-const TOOL_MAP = {
-  flipkart: "FlipkartCropper",
-  meesho: "MeshooCropper",
-  jiomart: "JioMartCropper",
-};
 
 // Routes
 app.post("/api/flipkart", upload.array("files", 50), (req, res) =>
@@ -258,7 +263,7 @@ app.get("/api/admin/files", async (req, res) => {
 
           // reverse map folder name → API route
           const apiTool =
-            Object.keys(TOOL_MAP).find((k) => TOOL_MAP[k] === tool) || tool;
+            Object.keys(TOOL_MAP).find((k) => TOOL_MAP[k] === tool) || tool.toLowerCase();
 
           allFiles.push({
             tool,
