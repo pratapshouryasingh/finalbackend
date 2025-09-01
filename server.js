@@ -110,7 +110,7 @@ function makeJobDirs(toolName) {
 function runPython({ inputDir, outputDir, toolsRoot }) {
   return new Promise((resolve, reject) => {
     const mainPy = path.join(toolsRoot, "main.py");
-    const configPath = path.join(outputDir, "config.json");
+    const configPath = path.join(toolsRoot, "config.json");
 
     const args = ["--input", inputDir, "--output", outputDir];
     if (fs.existsSync(configPath)) {
@@ -186,27 +186,26 @@ async function waitForOutputs(dir, timeoutMs = 120000) {
 async function processTool(toolName, req, res) {
   let inputDir;
   try {
-    const { userId, settings } = req.body;
-    if (!req.files || req.files.length === 0) {
+    const { userId, settings } = req.body; // 📦 Get userId from request
+    if (!req.files || req.files.length === 0)
       return res.status(400).json({ error: "No files uploaded" });
-    }
 
     // Validate tool exists
     const validatedToolName = validateTool(toolName);
     const { jobId, inputDir: idir, outputDir, toolsRoot } = makeJobDirs(validatedToolName);
     inputDir = idir;
 
-    console.log(`🛠️ Processing ${toolName} job: ${jobId} with ${req.files.length} files`);
+    console.log(`🛠️ Processing ${validatedToolName} job: ${jobId} with ${req.files.length} files`);
 
-    // Job-specific config
+    // Override config if settings sent (original approach that worked locally)
     if (settings) {
       try {
         const parsedSettings = typeof settings === 'string' ? JSON.parse(settings) : settings;
-        const configPath = path.join(outputDir, "config.json");
+        const configPath = path.join(toolsRoot, "config.json");
         await fsp.writeFile(configPath, JSON.stringify(parsedSettings, null, 2));
-        console.log(`✅ ${toolName} job-specific config.json created`);
+        console.log(`✅ ${validatedToolName} config.json overridden:`, parsedSettings);
       } catch (e) {
-        console.error(`❌ Failed to create job config.json:`, e);
+        console.error(`❌ Failed to override config.json:`, e);
       }
     }
 
@@ -226,14 +225,14 @@ async function processTool(toolName, req, res) {
     // Wait for outputs
     const files = await waitForOutputs(outputDir);
 
-    // Return both PDF and Excel
-    const outputs = files.map((name) => {
-      const apiTool = Object.keys(TOOL_MAP).find((k) => TOOL_MAP[k] === validatedToolName) || validatedToolName.toLowerCase();
-      return {
+    // Return both PDF and Excel files separately
+    const apiTool = Object.keys(TOOL_MAP).find((k) => TOOL_MAP[k] === validatedToolName) || validatedToolName.toLowerCase();
+    const outputs = files
+      .filter((f) => f.endsWith(".pdf") || f.endsWith(".xlsx"))
+      .map((name) => ({
         name,
         url: `/api/${apiTool}/download/${jobId}/${name}`,
-      };
-    });
+      }));
 
     // Save history
     let updatedHistory = [];
