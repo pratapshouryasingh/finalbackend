@@ -215,14 +215,38 @@ app.post("/api/jiomart", upload.array("files", 50), (req, res) =>
   processTool("JioMartCropper", req, res)
 );
 
-// Download route
+// --- Enhanced Download route with better logging ---
 app.get("/api/:tool/download/:jobId/:filename", (req, res) => {
   const { tool, jobId, filename } = req.params;
   const toolFolder = TOOL_MAP[tool.toLowerCase()] || tool;
 
-  const filePath = path.join(process.cwd(), "tools", toolFolder, "output", jobId, filename);
-  if (fs.existsSync(filePath)) res.download(filePath);
-  else res.status(404).json({ error: "File not found" });
+  // Full absolute path (important for AWS/EC2/Render)
+  const filePath = path.join(
+    process.cwd(),
+    "tools",
+    toolFolder,
+    "output",
+    jobId,
+    filename
+  );
+
+  console.log("📂 Download request:", { tool, jobId, filename, filePath });
+
+  if (!fs.existsSync(filePath)) {
+    console.error("❌ File not found:", filePath);
+    return res.status(404).json({ error: "File not found", path: filePath });
+  }
+
+  res.download(filePath, filename, (err) => {
+    if (err) {
+      console.error("❌ Error during download:", err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Download failed" });
+      }
+    } else {
+      console.log("✅ File sent successfully:", filePath);
+    }
+  });
 });
 
 // User history
