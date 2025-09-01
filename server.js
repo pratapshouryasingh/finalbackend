@@ -89,7 +89,7 @@ function runPython({ inputDir, outputDir, toolsRoot }) {
   return new Promise((resolve) => {
     const mainPy = path.join(toolsRoot, "main.py");
 
-    const child = spawn("python", [mainPy, "--input", inputDir, "--output", outputDir], {
+    const child = spawn("python3", [mainPy, "--input", inputDir, "--output", outputDir], {
       cwd: toolsRoot,
     });
 
