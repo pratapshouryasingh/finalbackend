@@ -13,8 +13,7 @@
     "url": "^0.11.4"
   },
   "scripts": {
-    "start": "node server.js",
-    "postinstall": "pip install -r requirements.txt || pip3 install -r requirements.txt"
+    "start": "node server.js"
   },
   "engines": {
     "node": "22.x"
