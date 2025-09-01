@@ -24,7 +24,7 @@ mongoose
 
 // --- CORS setup for deployment ---
 const allowedOrigins = [
-   "https://shippinglablecropper.vercel.app",
+  "https://shippinglablecropper.vercel.app",
   "https://shippinglablecropper-git-main-pratapshouryasinghs-projects.vercel.app",
   "http://localhost:5173",
   "http://localhost:5000",
