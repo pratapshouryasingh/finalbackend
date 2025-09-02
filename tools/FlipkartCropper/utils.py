@@ -219,8 +219,8 @@ def pdf_cropper(pdf_path, config, temp_path):
                 kw_keep = invoice_page.search_for("KEEP INVOICE") or invoice_page.search_for("Keep Invoice")
 
                 if kw_tax:
-                    # TAX INVOICE → crop from above keyword downwards
-                    y_start = max(0, kw_tax[0].y0 - 100)  # adjust -100 as padding
+                    # TAX INVOICE → crop from slightly above keyword downwards
+                    y_start = max(0, kw_tax[0].y0 - 100)  # adjust padding
                     invoice_rect = fitz.Rect(
                         0, y_start,
                         invoice_page.rect.width,
@@ -229,12 +229,12 @@ def pdf_cropper(pdf_path, config, temp_path):
                     invoice_page.set_cropbox(invoice_rect)
 
                 elif kw_keep:
-                    # KEEP INVOICE → crop from top until keyword
-                    y_end = min(invoice_page.rect.height, kw_keep[0].y0 + 20)  # +20 padding
+                    # KEEP INVOICE → crop from keyword downwards
+                    y_start = max(0, kw_keep[0].y0 - 20)  # adjust padding
                     invoice_rect = fitz.Rect(
-                        0, 0,
+                        0, y_start,
                         invoice_page.rect.width,
-                        y_end
+                        invoice_page.rect.height
                     )
                     invoice_page.set_cropbox(invoice_rect)
 
