@@ -185,11 +185,19 @@ def pdf_whitespace(pdf_path, temp_path):
     doc.close()
     return save_path
 
+import fitz  # PyMuPDF
+import os
+from tqdm import tqdm
+from datetime import datetime
+
 def pdf_cropper(pdf_path, config, temp_path):
     now = datetime.now()
     formatted_datetime = now.strftime("%d-%m-%y %I:%M %p")
     doc = fitz.open(pdf_path)
     result = fitz.open()
+
+    # Keywords to detect invoice section
+    invoice_keywords = ["TAX INVOICE", "KEEP INVOICE", "Keep Invoice"]
 
     for page_no in tqdm(range(len(doc)), desc="Cropping pages"):
         try:
@@ -214,17 +222,32 @@ def pdf_cropper(pdf_path, config, temp_path):
                 if config.get("add_date_on_top", False):
                     label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
-                # ---- CROP INVOICE (from TAX INVOICE downwards) ----
-                text_instances = invoice_page.search_for("TAX INVOICE")
-                if text_instances:
-                    invoice_rect = fitz.Rect(
-                        0, text_instances[0].y0 - 10,
-                        invoice_page.rect.width,
-                        invoice_page.rect.height
-                    )
-                    invoice_page.set_cropbox(invoice_rect)
-                else:
-                    # fallback
+                # ---- CROP INVOICE ----
+                cropped = False
+                for kw in invoice_keywords:
+                    matches = invoice_page.search_for(kw)
+                    if matches:
+                        y = matches[0].y0
+                        if kw.upper().startswith("KEEP"):
+                            # KEEP INVOICE → crop above (discard invoice)
+                            invoice_rect = fitz.Rect(
+                                0, 0,
+                                invoice_page.rect.width,
+                                y - 5
+                            )
+                        else:
+                            # TAX INVOICE → crop below (keep invoice)
+                            invoice_rect = fitz.Rect(
+                                0, y - 10,
+                                invoice_page.rect.width,
+                                invoice_page.rect.height
+                            )
+                        invoice_page.set_cropbox(invoice_rect)
+                        cropped = True
+                        break
+
+                if not cropped:
+                    # fallback = keep full page
                     invoice_page.set_cropbox(invoice_page.rect)
 
             else:
@@ -254,7 +277,6 @@ def pdf_cropper(pdf_path, config, temp_path):
     result.close()
     return output_filename
 
-# ---------------------- Create Count Excel ----------------------
 # ---------------------- Create Count Excel (Formatted like second script) ----------------------
 def create_count_excel(df, output_path):
     df["sku"] = df["sku"].astype(str).str.strip().replace({"nan": "", "None": ""})
