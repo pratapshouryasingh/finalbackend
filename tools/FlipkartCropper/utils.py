@@ -218,7 +218,7 @@ def pdf_cropper(pdf_path, config, temp_path):
                 text_instances = invoice_page.search_for("TAX INVOICE")
                 if text_instances:
                     invoice_rect = fitz.Rect(
-                        0, text_instances[0].y0 - 200,
+                        0, text_instances[0].y0 - 10,
                         invoice_page.rect.width,
                         invoice_page.rect.height
                     )
@@ -253,33 +253,74 @@ def pdf_cropper(pdf_path, config, temp_path):
     result.save(output_filename, garbage=4, deflate=True, clean=True)
     result.close()
     return output_filename
+
 # ---------------------- Create Count Excel ----------------------
+# ---------------------- Create Count Excel (Formatted like second script) ----------------------
 def create_count_excel(df, output_path):
     df["sku"] = df["sku"].astype(str).str.strip().replace({"nan": "", "None": ""})
     df["soldBy"] = df["soldBy"].astype(str).fillna("")
-    sku_df = df.groupby("sku", as_index=False).agg(Qty=("qty", "first"), Count=("page", "count"))
-    sku_df["SKU_lower"] = sku_df["sku"].str.lower()
-    sku_df = sku_df.sort_values(by=["Count", "SKU_lower"], ascending=[False, True])
-    sku_df = sku_df.rename(columns={"sku": "SKU"})[["Qty", "SKU", "Count"]].reset_index(drop=True)
+    df["color"] = df.get("color", "")  # ensure column exists
+    df["size"] = df.get("size", "")    # ensure column exists
 
-    courier_df = df.groupby(["courier", "soldBy"], as_index=False).size().rename(
-        columns={"size": "Packages", "courier": "Courier", "soldBy": "SoldBy"}
-    ).sort_values(by=["Packages", "Courier"], ascending=[False, True]).reset_index(drop=True)
+    # SKU REPORT
+    sku_df = df[["qty", "soldBy", "color", "sku"]].value_counts().reset_index()
+    sku_df.columns = ["Qty", "SoldBy", "Color", "SKU", "Count"]
+    sku_df["SKU_lower"] = sku_df["SKU"].str.lower()
+    sku_df = sku_df.sort_values(by=["Count", "SKU_lower", "Qty"], ascending=[False, True, True])
+    sku_df = sku_df.drop(columns=["SKU_lower"]).reset_index(drop=True)
 
-    soldby_df = df.groupby("soldBy", as_index=False).size().rename(
-        columns={"size": "Packages", "soldBy": "SoldBy"}
-    ).sort_values(by=["Packages", "SoldBy"], ascending=[False, True]).reset_index(drop=True)
+    # COURIER + SOLD BY REPORT
+    courierSold_df = df[["courier", "soldBy"]].value_counts().reset_index()
+    courierSold_df.columns = ["Courier", "SoldBy", "Packages"]
+    courierSold_df = courierSold_df.sort_values(by=["Packages", "Courier"], ascending=[False, True]).reset_index(drop=True)
 
+    # COURIER REPORT
+    courier_df = df[["courier"]].value_counts().reset_index()
+    courier_df.columns = ["Courier", "Packages"]
+    courier_df = courier_df.sort_values(by=["Packages", "Courier"], ascending=[False, True]).reset_index(drop=True)
+
+    # SOLD BY REPORT
+    soldby_df = df[["soldBy"]].value_counts().reset_index()
+    soldby_df.columns = ["SoldBy", "Packages"]
+    soldby_df = soldby_df.sort_values(by=["Packages", "SoldBy"], ascending=[False, True]).reset_index(drop=True)
+
+    # Save Excel with formatting
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     filename = f"summary_report_{timestamp}.xlsx"
     summary_path = os.path.join(output_path, filename)
 
-    # Use fast to_excel instead of manual formatting
     with pd.ExcelWriter(summary_path, engine="xlsxwriter") as writer:
-        sku_df.to_excel(writer, sheet_name="SKU REPORT", index=False)
-        courier_df.to_excel(writer, sheet_name="COURIER + SOLD BY REPORT", index=False)
-        soldby_df.to_excel(writer, sheet_name="SOLD BY REPORT", index=False)
+        workbook = writer.book
+        worksheet = workbook.add_worksheet("Summary")
+        writer.sheets["Summary"] = worksheet
 
-    print(f"✅ {filename} generated successfully.")
+        bold_format = workbook.add_format({'bold': True, 'font_size': 12})
+        header_format = workbook.add_format({'bold': True, 'bg_color': '#DDEEFF', 'border': 1, 'text_wrap': True})
+        wrap_format = workbook.add_format({'text_wrap': True})
+
+        row = 0
+        def write_block(title, df_block):
+            nonlocal row
+            worksheet.write(row, 0, title, bold_format)
+            row += 1
+            for col_num, value in enumerate(df_block.columns):
+                worksheet.write(row, col_num, value, header_format)
+            row += 1
+            for r in df_block.values:
+                for col_num, value in enumerate(r):
+                    worksheet.write(row, col_num, value, wrap_format)
+                row += 1
+            for i, col in enumerate(df_block.columns):
+                max_len = max([len(str(col))] + [len(str(val)) for val in df_block[col]])
+                worksheet.set_column(i, i, min(max_len + 2, 30))
+            row += 2
+
+        # Write all blocks
+        write_block("SKU REPORT", sku_df)
+        write_block("COURIER + SOLD BY REPORT", courierSold_df)
+        write_block("COURIER REPORT", courier_df)
+        write_block("SOLD BY REPORT", soldby_df)
+
+    print(f"✅ Excel generated -> {summary_path}")
     return summary_path
 
