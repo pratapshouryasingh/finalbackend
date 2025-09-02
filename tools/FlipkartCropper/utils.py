@@ -185,19 +185,11 @@ def pdf_whitespace(pdf_path, temp_path):
     doc.close()
     return save_path
 
-import fitz  # PyMuPDF
-import os
-from tqdm import tqdm
-from datetime import datetime
-
 def pdf_cropper(pdf_path, config, temp_path):
     now = datetime.now()
     formatted_datetime = now.strftime("%d-%m-%y %I:%M %p")
     doc = fitz.open(pdf_path)
     result = fitz.open()
-
-    # Keywords to detect invoice section
-    invoice_keywords = ["TAX INVOICE", "KEEP INVOICE", "Keep Invoice"]
 
     for page_no in tqdm(range(len(doc)), desc="Cropping pages"):
         try:
@@ -223,30 +215,30 @@ def pdf_cropper(pdf_path, config, temp_path):
                     label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
                 # ---- CROP INVOICE ----
-                cropped = False
-                for kw in invoice_keywords:
-                    matches = invoice_page.search_for(kw)
-                    if matches:
-                        y = matches[0].y0
-                        if kw.upper().startswith("KEEP"):
-                            # KEEP INVOICE → crop above (discard invoice)
-                            invoice_rect = fitz.Rect(
-                                0, 0,
-                                invoice_page.rect.width,
-                                y - 5
-                            )
-                        else:
-                            # TAX INVOICE → crop below (keep invoice)
-                            invoice_rect = fitz.Rect(
-                                0, y - 10,
-                                invoice_page.rect.width,
-                                invoice_page.rect.height
-                            )
-                        invoice_page.set_cropbox(invoice_rect)
-                        cropped = True
-                        break
+                kw_tax = invoice_page.search_for("TAX INVOICE")
+                kw_keep = invoice_page.search_for("KEEP INVOICE") or invoice_page.search_for("Keep Invoice")
 
-                if not cropped:
+                if kw_tax:
+                    # TAX INVOICE → crop from above keyword downwards
+                    y_start = max(0, kw_tax[0].y0 - 100)  # adjust -100 as padding
+                    invoice_rect = fitz.Rect(
+                        0, y_start,
+                        invoice_page.rect.width,
+                        invoice_page.rect.height
+                    )
+                    invoice_page.set_cropbox(invoice_rect)
+
+                elif kw_keep:
+                    # KEEP INVOICE → crop from top until keyword
+                    y_end = min(invoice_page.rect.height, kw_keep[0].y0 + 20)  # +20 padding
+                    invoice_rect = fitz.Rect(
+                        0, 0,
+                        invoice_page.rect.width,
+                        y_end
+                    )
+                    invoice_page.set_cropbox(invoice_rect)
+
+                else:
                     # fallback = keep full page
                     invoice_page.set_cropbox(invoice_page.rect)
 
