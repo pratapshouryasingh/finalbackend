@@ -185,11 +185,6 @@ def pdf_whitespace(pdf_path, temp_path):
     doc.close()
     return save_path
 
-import fitz  # PyMuPDF
-import os
-from datetime import datetime
-from tqdm import tqdm
-
 def pdf_cropper(pdf_path, config, temp_path):
     now = datetime.now()
     formatted_datetime = now.strftime("%d-%m-%y %I:%M %p")
@@ -219,22 +214,21 @@ def pdf_cropper(pdf_path, config, temp_path):
                 if config.get("add_date_on_top", False):
                     label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
-                # ---- CROP INVOICE (from TAX INVOICE / KEEP INVOICE downwards) ----
-                text_instances = invoice_page.search_for("TAX INVOICE") or invoice_page.search_for("KEEP INVOICE") or invoice_page.search_for("Keep Invoice")
+                # ---- CROP INVOICE (from TAX INVOICE downwards) ----
+                text_instances = invoice_page.search_for("TAX INVOICE")
                 if text_instances:
-                    start_y = text_instances[0].y0 - 10
                     invoice_rect = fitz.Rect(
-                        0, start_y,
+                        0, text_instances[0].y0 - 10,
                         invoice_page.rect.width,
                         invoice_page.rect.height
                     )
                     invoice_page.set_cropbox(invoice_rect)
                 else:
-                    # fallback: keep full page
+                    # fallback
                     invoice_page.set_cropbox(invoice_page.rect)
 
             else:
-                # ---- Only Label ----
+                # Only label
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
                 label_page = result[-1]
 
@@ -259,7 +253,6 @@ def pdf_cropper(pdf_path, config, temp_path):
     result.save(output_filename, garbage=4, deflate=True, clean=True)
     result.close()
     return output_filename
-
 
 # ---------------------- Create Count Excel ----------------------
 # ---------------------- Create Count Excel (Formatted like second script) ----------------------
