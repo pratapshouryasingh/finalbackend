@@ -185,158 +185,67 @@ def pdf_whitespace(pdf_path, temp_path):
     doc.close()
     return save_path
 
-import fitz
-from datetime import datetime
-import os
-from tqdm import tqdm
-
-# ---------- helper: robustly find "Tax Invoice" Y position ----------
-def _find_invoice_y(page, min_y_ratio=0.30):
-    """
-    Try several ways to find the top Y of the invoice heading.
-    Returns a float Y (points) or None if not found.
-    """
-    page_h = float(page.rect.height)
-
-    # 1) Direct text search with common variants
-    variants = ["TAX INVOICE", "Tax Invoice", "Tax invoice", "Invoice"]
-    rects = []
-    for v in variants:
-        try:
-            rects += page.search_for(v)
-        except Exception:
-            pass
-
-    if rects:
-        rects_sorted = sorted(rects, key=lambda r: r.y0)
-        # Prefer a match below min_y_ratio of the page to avoid headers
-        candidates = [r for r in rects_sorted if r.y0 > page_h * min_y_ratio]
-        r = candidates[0] if candidates else rects_sorted[0]
-        return float(r.y0)
-
-    # 2) Word-level search (more robust across fonts)
-    try:
-        words = page.get_text("words")  # (x0,y0,x1,y1,word,block,line,word_no)
-        if not words:
-            return None
-        words.sort(key=lambda w: (w[1], w[0]))  # sort by y0, then x0
-
-        # Look for "Tax" followed by "Invoice" on the same line
-        for i in range(len(words) - 1):
-            w1, w2 = words[i], words[i + 1]
-            if w1[4].lower() == "tax" and w2[4].lower().startswith("invoice"):
-                # same line: small vertical gap
-                if abs(w1[1] - w2[1]) < 8:
-                    y0 = min(w1[1], w2[1])
-                    if y0 > page_h * min_y_ratio:
-                        return float(y0)
-
-        # Otherwise, any "invoice" word near bottom half
-        invoice_words = [w for w in words if w[4].lower() == "invoice"]
-        if invoice_words:
-            invoice_words.sort(key=lambda w: w[1])
-            y0 = float(invoice_words[0][1])
-            if y0 > page_h * min_y_ratio:
-                return y0
-    except Exception:
-        pass
-
-    return None
-
-
-# ---------------------- UPDATED CROPPER ----------------------
 def pdf_cropper(pdf_path, config, temp_path):
-    """
-    Split each page into LABEL (+ optional date) and INVOICE (if keep_invoice=True).
-
-    Config keys (all optional):
-      - keep_invoice: bool (default False)
-      - add_date_on_top: bool (default False)
-      - label_left_margin: int (default 185)
-      - label_top_margin: int (default 15)
-      - invoice_top_ratio: float between 0..1 used when heading not found (default 0.58)
-      - invoice_top_fixed_y: number (points). If set, forces the split Y no matter what.
-
-    Output: temp_path/cropped_final.pdf
-    """
     now = datetime.now()
     formatted_datetime = now.strftime("%d-%m-%y %I:%M %p")
-
-    keep_invoice = bool(config.get("keep_invoice", False))
-    add_date = bool(config.get("add_date_on_top", False))
-    label_left = int(config.get("label_left_margin", 185))
-    label_top = int(config.get("label_top_margin", 15))
-    # fallback if "Tax Invoice" not found
-    ratio_fallback = float(config.get("invoice_top_ratio", 0.58))
-    fixed_y = config.get("invoice_top_fixed_y", None)  # e.g., 500.0
-
     doc = fitz.open(pdf_path)
     result = fitz.open()
 
     for page_no in tqdm(range(len(doc)), desc="Cropping pages"):
         try:
-            page = doc[page_no]
-            W, H = float(page.rect.width), float(page.rect.height)
-
-            # 1) Determine invoice top Y
-            if fixed_y is not None:
-                invoice_y_top = float(fixed_y)
-            else:
-                invoice_y_top = _find_invoice_y(page)  # try to detect
-                if invoice_y_top is None:
-                    invoice_y_top = H * ratio_fallback  # hard-coded ratio fallback
-
-            # Safety clamp
-            invoice_y_top = max(30.0, min(invoice_y_top, H - 30.0))
-
-            # 2) Build rects
-            #    LABEL: crop the central label area (exclude left/right bars) up to just above invoice
-            label_bottom = max(label_top + 10.0, invoice_y_top - 12.0)
-            label_rect = fitz.Rect(
-                label_left,               # left
-                label_top,                # top
-                W - label_left,           # right
-                label_bottom              # bottom
-            )
-
-            # Ensure a sane label rect; if it collapses, use upper half as fallback
-            if label_rect.height <= 20 or label_rect.width <= 20:
-                label_rect = fitz.Rect(
-                    label_left, label_top,
-                    W - label_left, H * 0.5
-                )
-
-            #    INVOICE: from the heading downwards, full width
-            invoice_top = max(0.0, invoice_y_top - 10.0)
-            invoice_rect = fitz.Rect(
-                0.0, invoice_top,
-                W, H
-            )
-
-            # 3) Write pages
-            if keep_invoice:
-                # Add label
+            if config.get("keep_invoice", False):
+                # Insert full page twice: first = Label, second = Invoice
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
-                lp = result[-1]
-                lp.set_cropbox(label_rect)
-                if add_date:
-                    lp.insert_text(fitz.Point(12, 12), formatted_datetime, fontsize=11)
-
-                # Add invoice
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
-                ip = result[-1]
-                ip.set_cropbox(invoice_rect)
+
+                label_page = result[-2]
+                invoice_page = result[-1]
+
+                # ---- CROP LABEL ----
+                text_instances = label_page.search_for("Order Id:")
+                if text_instances:
+                    label_rect = fitz.Rect(
+                        185, 15,
+                        label_page.rect.width - 185,
+                        text_instances[0].y0 - 10
+                    )
+                    label_page.set_cropbox(label_rect)
+
+                if config.get("add_date_on_top", False):
+                    label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
+
+                # ---- CROP INVOICE (from TAX INVOICE downwards) ----
+                text_instances = invoice_page.search_for("TAX INVOICE")
+                if text_instances:
+                    invoice_rect = fitz.Rect(
+                        0, text_instances[0].y0 - 10,
+                        invoice_page.rect.width,
+                        invoice_page.rect.height
+                    )
+                    invoice_page.set_cropbox(invoice_rect)
+                else:
+                    # fallback
+                    invoice_page.set_cropbox(invoice_page.rect)
+
             else:
                 # Only label
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
-                lp = result[-1]
-                lp.set_cropbox(label_rect)
-                if add_date:
-                    lp.insert_text(fitz.Point(12, 12), formatted_datetime, fontsize=11)
+                label_page = result[-1]
+
+                text_instances = label_page.search_for("Order Id:")
+                if text_instances:
+                    label_rect = fitz.Rect(
+                        185, 15,
+                        label_page.rect.width - 185,
+                        text_instances[0].y0 - 10
+                    )
+                    label_page.set_cropbox(label_rect)
+
+                if config.get("add_date_on_top", False):
+                    label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
         except Exception as e:
             print(f"⚠️ Error cropping page {page_no}: {e}")
-            # Fallback: pass-through original page
             result.insert_pdf(doc, from_page=page_no, to_page=page_no)
 
     doc.close()
@@ -344,7 +253,6 @@ def pdf_cropper(pdf_path, config, temp_path):
     result.save(output_filename, garbage=4, deflate=True, clean=True)
     result.close()
     return output_filename
-
 
 # ---------------------- Create Count Excel ----------------------
 # ---------------------- Create Count Excel (Formatted like second script) ----------------------
@@ -415,4 +323,3 @@ def create_count_excel(df, output_path):
 
     print(f"✅ Excel generated -> {summary_path}")
     return summary_path
-
