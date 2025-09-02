@@ -207,7 +207,7 @@ def pdf_cropper(pdf_path, config, temp_path):
                     label_rect = fitz.Rect(
                         185, 15,
                         label_page.rect.width - 185,
-                        text_instances[0].y0 - 10
+                        text_instances[0].y0 - 100
                     )
                     label_page.set_cropbox(label_rect)
 
