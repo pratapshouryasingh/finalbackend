@@ -214,32 +214,17 @@ def pdf_cropper(pdf_path, config, temp_path):
                 if config.get("add_date_on_top", False):
                     label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
-                # ---- CROP INVOICE ----
-                kw_tax = invoice_page.search_for("TAX INVOICE")
-                kw_keep = invoice_page.search_for("KEEP INVOICE") or invoice_page.search_for("Keep Invoice")
-
-                if kw_tax:
-                    # TAX INVOICE → crop from slightly above keyword downwards
-                    y_start = min(invoice_page.rect.height, kw_tax[0].y0 + 20)  # adjust padding
+                # ---- CROP INVOICE (from TAX INVOICE downwards) ----
+                text_instances = invoice_page.search_for("TAX INVOICE")
+                if text_instances:
                     invoice_rect = fitz.Rect(
-                        0, y_start,
+                        0, text_instances[0].y0 - 10,
                         invoice_page.rect.width,
                         invoice_page.rect.height
                     )
                     invoice_page.set_cropbox(invoice_rect)
-
-                elif kw_keep:
-                    # KEEP INVOICE → crop from keyword downwards
-                    y_start = max(0, kw_keep[0].y0 - 20)  # adjust padding
-                    invoice_rect = fitz.Rect(
-                        0, y_start,
-                        invoice_page.rect.width,
-                        invoice_page.rect.height
-                    )
-                    invoice_page.set_cropbox(invoice_rect)
-
                 else:
-                    # fallback = keep full page
+                    # fallback
                     invoice_page.set_cropbox(invoice_page.rect)
 
             else:
