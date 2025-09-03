@@ -215,17 +215,17 @@ def pdf_cropper(pdf_path, config, temp_path):
                     label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
                 # ---- CROP INVOICE (from TAX INVOICE downwards) ----
-                text_instances = invoice_page.search_for("TAX INVOICE")
+                text_instances = invoice_page.search_for("TAX INVOICE", flags=fitz.TEXT_IGNORECASE)
                 if text_instances:
+                    y_top = text_instances[0].y1 + 2  # start just below the keyword
                     invoice_rect = fitz.Rect(
-                        0, text_instances[0].y0 - 10,
+                        0, y_top,
                         invoice_page.rect.width,
-                        invoice_page.rect.height
+                        invoice_page.rect.height  # include full bottom
                     )
                     invoice_page.set_cropbox(invoice_rect)
                 else:
-                    # fallback
-                    invoice_page.set_cropbox(invoice_page.rect)
+                    invoice_page.set_cropbox(invoice_page.rect)  # fallback
 
             else:
                 # Only label
@@ -253,7 +253,6 @@ def pdf_cropper(pdf_path, config, temp_path):
     result.save(output_filename, garbage=4, deflate=True, clean=True)
     result.close()
     return output_filename
-
 
 # ---------------------- Create Count Excel (Formatted like second script) ----------------------
 def create_count_excel(df, output_path):
