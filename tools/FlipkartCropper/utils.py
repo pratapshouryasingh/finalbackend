@@ -242,6 +242,7 @@ def pdf_cropper(pdf_path, config, temp_path):
     result.close()
     return output_filename
 
+
 # ---------------------- Create Count Excel (Formatted like second script) ----------------------
 def create_count_excel(df, output_path):
     df["sku"] = df["sku"].astype(str).str.strip().replace({"nan": "", "None": ""})
