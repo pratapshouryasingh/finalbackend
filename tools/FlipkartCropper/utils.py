@@ -191,10 +191,13 @@ def pdf_cropper(pdf_path, config, temp_path):
     doc = fitz.open(pdf_path)
     result = fitz.open()
 
+    invoice_keywords = ["TAX INVOICE", "INVOICE"]  # fallback keywords
+
     for page_no in tqdm(range(len(doc)), desc="Cropping pages"):
         try:
+            # Insert pages based on keep_invoice config
             if config.get("keep_invoice", False):
-                # Insert full page twice: first = Label, second = Invoice
+                # Insert the page twice: label + invoice
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
 
@@ -214,18 +217,26 @@ def pdf_cropper(pdf_path, config, temp_path):
                 if config.get("add_date_on_top", False):
                     label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
-                # ---- CROP INVOICE (from TAX INVOICE downwards) ----
-                text_instances = invoice_page.search_for("TAX INVOICE")
+                # ---- CROP INVOICE ----
+                text_instances = None
+                # Search for any of the invoice keywords
+                for kw in invoice_keywords:
+                    text_instances = invoice_page.search_for(kw, flags=fitz.TEXT_IGNORECASE)
+                    if text_instances:
+                        break
+
                 if text_instances:
+                    y_top = max(0, text_instances[0].y0 - 10)
                     invoice_rect = fitz.Rect(
-                        0, text_instances[0].y0 - 10,
+                        0, y_top,
                         invoice_page.rect.width,
                         invoice_page.rect.height
                     )
-                    invoice_page.set_cropbox(invoice_rect)
                 else:
-                    # fallback
-                    invoice_page.set_cropbox(invoice_page.rect)
+                    # fallback: crop full page
+                    invoice_rect = invoice_page.rect
+
+                invoice_page.set_cropbox(invoice_rect)
 
             else:
                 # Only label
@@ -246,6 +257,7 @@ def pdf_cropper(pdf_path, config, temp_path):
 
         except Exception as e:
             print(f"⚠️ Error cropping page {page_no}: {e}")
+            # fallback: insert page without cropping
             result.insert_pdf(doc, from_page=page_no, to_page=page_no)
 
     doc.close()
