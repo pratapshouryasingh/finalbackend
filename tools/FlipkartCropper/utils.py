@@ -204,40 +204,36 @@ def pdf_cropper(pdf_path, config, temp_path):
 
             # --- LABEL PAGE ---
             label_page = result.new_page(width=page.rect.width, height=page.rect.height)
-            label_clip = page.rect  # default full page
-
             text_instances = page.search_for("Order Id:")
             if text_instances:
-                label_clip = fitz.Rect(
-                    185, 15,
-                    page.rect.width - 185,
-                    text_instances[0].y0 - 10
-                )
-            label_page.show_pdf_page(label_page.rect, doc, page_no, clip=label_clip)
+                clip = fitz.Rect(185, 15, page.rect.width - 185, text_instances[0].y0 - 10)
+            else:
+                clip = page.rect
+            label_page.show_pdf_page(label_page.rect, doc, page_no, clip=clip)
 
             if config.get("add_date_on_top", False):
                 label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
-            # --- INVOICE PAGE (if keep_invoice) ---
+            # --- INVOICE PAGE ---
             if config.get("keep_invoice", False):
                 invoice_page = result.new_page(width=page.rect.width, height=page.rect.height)
-                text_instances = None
+                clip = page.rect  # fallback full page
+
+                # Find first occurrence of TAX INVOICE
                 for kw in invoice_keywords:
-                    text_instances = page.search_for(kw, flags=fitz.TEXT_IGNORECASE)
-                    if text_instances:
+                    instances = page.search_for(kw, flags=fitz.TEXT_IGNORECASE)
+                    if instances:
+                        clip = fitz.Rect(0, instances[0].y1, page.rect.width, page.rect.height)
                         break
 
-                if text_instances:
-                    y_top = text_instances[0].y1 + 2
-                    clip_rect = fitz.Rect(0, y_top, page.rect.width, page.rect.height)
-                else:
-                    clip_rect = page.rect  # fallback full page
+                # Prevent invalid clip
+                if clip.y1 <= clip.y0:
+                    clip = page.rect
 
-                invoice_page.show_pdf_page(invoice_page.rect, doc, page_no, clip=clip_rect)
+                invoice_page.show_pdf_page(invoice_page.rect, doc, page_no, clip=clip)
 
         except Exception as e:
             print(f"⚠️ Error cropping page {page_no}: {e}")
-            # fallback: insert full page
             result.insert_pdf(doc, from_page=page_no, to_page=page_no)
 
     doc.close()
