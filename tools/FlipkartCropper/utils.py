@@ -203,37 +203,52 @@ def pdf_cropper(pdf_path, config, temp_path):
             page = doc[page_no]
 
             # --- LABEL PAGE ---
-            label_page = result.new_page(width=page.rect.width, height=page.rect.height)
-            text_instances = page.search_for("Order Id:")
+            result.insert_pdf(doc, from_page=page_no, to_page=page_no)
+            label_page = result[-1]
+
+            # Crop label
+            text_instances = label_page.search_for("Order Id:")
             if text_instances:
-                clip = fitz.Rect(185, 15, page.rect.width - 185, text_instances[0].y0 - 10)
-            else:
-                clip = page.rect
-            label_page.show_pdf_page(label_page.rect, doc, page_no, clip=clip)
+                label_rect = fitz.Rect(
+                    185, 15,
+                    label_page.rect.width - 185,
+                    text_instances[0].y0 - 10
+                )
+                label_page.set_cropbox(label_rect)
 
             if config.get("add_date_on_top", False):
                 label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
             # --- INVOICE PAGE ---
             if config.get("keep_invoice", False):
-                invoice_page = result.new_page(width=page.rect.width, height=page.rect.height)
-                clip = page.rect  # fallback full page
+                # Insert invoice page
+                result.insert_pdf(doc, from_page=page_no, to_page=page_no)
+                invoice_page = result[-1]
 
-                # Find first occurrence of TAX INVOICE
+                # Find keyword position
+                text_instances = None
                 for kw in invoice_keywords:
-                    instances = page.search_for(kw, flags=fitz.TEXT_IGNORECASE)
-                    if instances:
-                        clip = fitz.Rect(0, instances[0].y1, page.rect.width, page.rect.height)
+                    text_instances = invoice_page.search_for(kw, flags=fitz.TEXT_IGNORECASE)
+                    if text_instances:
                         break
 
-                # Prevent invalid clip
-                if clip.y1 <= clip.y0:
-                    clip = page.rect
-
-                invoice_page.show_pdf_page(invoice_page.rect, doc, page_no, clip=clip)
+                if text_instances:
+                    # Crop from just below keyword to bottom
+                    y_top = text_instances[0].y1 + 2  # start below keyword
+                    page_bottom = invoice_page.rect.y1  # bottom of page
+                    invoice_rect = fitz.Rect(
+                        0,
+                        y_top,
+                        invoice_page.rect.width,
+                        page_bottom
+                    )
+                    invoice_page.set_cropbox(invoice_rect)
+                else:
+                    invoice_page.set_cropbox(invoice_page.rect)
 
         except Exception as e:
             print(f"⚠️ Error cropping page {page_no}: {e}")
+            # fallback: insert full page
             result.insert_pdf(doc, from_page=page_no, to_page=page_no)
 
     doc.close()
