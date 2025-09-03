@@ -186,69 +186,66 @@ def pdf_whitespace(pdf_path, temp_path):
     return save_path
 
 def pdf_cropper(pdf_path, config, temp_path):
-    import fitz
-    from datetime import datetime
-    from tqdm import tqdm
-    import os
-
     now = datetime.now()
     formatted_datetime = now.strftime("%d-%m-%y %I:%M %p")
     doc = fitz.open(pdf_path)
     result = fitz.open()
 
-    invoice_keywords = ["TAX INVOICE", "INVOICE"]
-
     for page_no in tqdm(range(len(doc)), desc="Cropping pages"):
         try:
-            page = doc[page_no]
-
-            # --- LABEL PAGE ---
-            result.insert_pdf(doc, from_page=page_no, to_page=page_no)
-            label_page = result[-1]
-
-            # Crop label
-            text_instances = label_page.search_for("Order Id:")
-            if text_instances:
-                label_rect = fitz.Rect(
-                    185, 15,
-                    label_page.rect.width - 185,
-                    text_instances[0].y0 - 10
-                )
-                label_page.set_cropbox(label_rect)
-
-            if config.get("add_date_on_top", False):
-                label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
-
-            # --- INVOICE PAGE ---
             if config.get("keep_invoice", False):
-                # Insert invoice page
+                # Insert full page twice: first = Label, second = Invoice
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
+                result.insert_pdf(doc, from_page=page_no, to_page=page_no)
+
+                label_page = result[-2]
                 invoice_page = result[-1]
 
-                # Find keyword position
-                text_instances = None
-                for kw in invoice_keywords:
-                    text_instances = invoice_page.search_for(kw, flags=fitz.TEXT_IGNORECASE)
-                    if text_instances:
-                        break
-
+                # ---- CROP LABEL ----
+                text_instances = label_page.search_for("Order Id:")
                 if text_instances:
-                    # Crop from just below keyword to bottom
-                    y_top = text_instances[0].y1 + 2  # start below keyword
-                    page_bottom = invoice_page.rect.y1  # bottom of page
+                    label_rect = fitz.Rect(
+                        185, 15,
+                        label_page.rect.width - 185,
+                        text_instances[0].y0 - 10
+                    )
+                    label_page.set_cropbox(label_rect)
+
+                if config.get("add_date_on_top", False):
+                    label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
+
+                # ---- CROP INVOICE (from TAX INVOICE downwards) ----
+                text_instances = invoice_page.search_for("TAX INVOICE")
+                if text_instances:
                     invoice_rect = fitz.Rect(
-                        0,
-                        y_top,
+                        0, text_instances[0].y0 - 10,
                         invoice_page.rect.width,
-                        page_bottom
+                        invoice_page.rect.height
                     )
                     invoice_page.set_cropbox(invoice_rect)
                 else:
+                    # fallback
                     invoice_page.set_cropbox(invoice_page.rect)
+
+            else:
+                # Only label
+                result.insert_pdf(doc, from_page=page_no, to_page=page_no)
+                label_page = result[-1]
+
+                text_instances = label_page.search_for("Order Id:")
+                if text_instances:
+                    label_rect = fitz.Rect(
+                        185, 15,
+                        label_page.rect.width - 185,
+                        text_instances[0].y0 - 10
+                    )
+                    label_page.set_cropbox(label_rect)
+
+                if config.get("add_date_on_top", False):
+                    label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
         except Exception as e:
             print(f"⚠️ Error cropping page {page_no}: {e}")
-            # fallback: insert full page
             result.insert_pdf(doc, from_page=page_no, to_page=page_no)
 
     doc.close()
@@ -256,7 +253,6 @@ def pdf_cropper(pdf_path, config, temp_path):
     result.save(output_filename, garbage=4, deflate=True, clean=True)
     result.close()
     return output_filename
-
 
 # ---------------------- Create Count Excel (Formatted like second script) ----------------------
 def create_count_excel(df, output_path):
