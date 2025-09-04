@@ -220,14 +220,14 @@ def pdf_cropper(pdf_path, config, temp_path):
                 # ---- CROP INVOICE ----
                 start = invoice_page.search_for("Tax Invoice") or invoice_page.search_for("TAX INVOICE")
                 if start:
-                    top_y = start[0].y0 - padding
+                    top_y = start[0].y0 + padding
 
                     # look for bottom markers
                     end = (invoice_page.search_for("Invoice No") or
                            invoice_page.search_for("GSTIN") or
                            invoice_page.search_for("Order Id:"))
                     if end:
-                        bottom_y = max([r.y1 for r in end]) + 300  # extend a bit
+                        bottom_y = max([r.y1 for r in end]) + 200  # extend a bit
                     else:
                         bottom_y = top_y + fixed_invoice_height
 
