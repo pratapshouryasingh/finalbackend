@@ -186,7 +186,6 @@ def pdf_whitespace(pdf_path, temp_path):
     return save_path
     
 def pdf_cropper(pdf_path, config, temp_path):
-
     now = datetime.now()
     formatted_datetime = now.strftime("%d-%m-%y %I:%M %p")
     doc = fitz.open(pdf_path)
@@ -215,21 +214,8 @@ def pdf_cropper(pdf_path, config, temp_path):
                 if config.get("add_date_on_top", False):
                     label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
-                # ---- CROP INVOICE (full invoice like Image 2) ----
-                start = (invoice_page.search_for("Tax Invoice") or
-                         invoice_page.search_for("TAX INVOICE"))
-                if start:
-                    top_y = max(0, start[0].y0 - 20)  # small margin above header
-
-                    invoice_rect = fitz.Rect(
-                        0,
-                        top_y,
-                        invoice_page.rect.width,
-                        invoice_page.rect.height  # extend fully to bottom
-                    )
-                    invoice_page.set_cropbox(invoice_rect)
-                else:
-                    invoice_page.set_cropbox(invoice_page.rect)  # fallback
+                # ---- CROP INVOICE (keep full details, top → bottom) ----
+                invoice_page.set_cropbox(invoice_page.rect)
 
             else:
                 # Only label
@@ -257,6 +243,7 @@ def pdf_cropper(pdf_path, config, temp_path):
     result.save(output_filename, garbage=4, deflate=True, clean=True)
     result.close()
     return output_filename
+
 
 # ---------------------- Create Count Excel (Formatted like second script) ----------------------
 def create_count_excel(df, output_path):
