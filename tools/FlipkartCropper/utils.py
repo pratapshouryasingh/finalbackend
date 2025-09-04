@@ -188,72 +188,86 @@ def pdf_whitespace(pdf_path, temp_path):
 def pdf_cropper(pdf_path, config, temp_path):
     now = datetime.now()
     formatted_datetime = now.strftime("%d-%m-%y %I:%M %p")
+
     doc = fitz.open(pdf_path)
     result = fitz.open()
 
-    padding = 5
-    fixed_invoice_height = 1000 
+    padding = int(config.get("padding", 6))
+    fixed_invoice_height = int(config.get("invoice_height", 900))  # change in config.json
 
     for page_no in tqdm(range(len(doc)), desc="Cropping pages"):
         try:
             if config.get("keep_invoice", False):
-                # Insert full page twice
+                # duplicate page -> [-2]=label, [-1]=invoice
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
 
                 label_page = result[-2]
                 invoice_page = result[-1]
 
-                # ---- CROP LABEL ----
-                text_instances = label_page.search_for("Order Id:")
-                if text_instances:
-                    label_rect = fitz.Rect(
-                        185, 15,
-                        label_page.rect.width - 185,
-                        text_instances[0].y0 - 10
-                    )
-                    label_page.set_cropbox(label_rect)
+                # ---------------- LABEL: hard crop
+                try:
+                    hits = label_page.search_for("Order Id:")
+                    if hits:
+                        bottom_y = hits[0].y0 - 10
+                        rect = fitz.Rect(
+                            185, 15,
+                            label_page.rect.width - 185,
+                            max(0, bottom_y)
+                        )
+                        label_page.set_mediabox(rect)
+                except Exception:
+                    pass
 
                 if config.get("add_date_on_top", False):
                     label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
-                # ---- CROP INVOICE ----
-                start = invoice_page.search_for("Tax Invoice") or invoice_page.search_for("TAX INVOICE")
-                if start:
-                    top_y = start[0].y0 - padding
+                # ---------------- INVOICE: hard crop
+                start_hits = (invoice_page.search_for("Tax Invoice")
+                              or invoice_page.search_for("TAX INVOICE"))
+                if start_hits:
+                    top_y = min(h.y0 for h in start_hits) - padding
 
-                    # look for bottom markers
-                    end = (invoice_page.search_for("Invoice No") or
-                           invoice_page.search_for("GSTIN") or
-                           invoice_page.search_for("Order Id:"))
-                    if end:
-                        bottom_y = max([r.y1 for r in end]) + 100  # extend a bit
+                    # try to find a lower marker to extend a bit past it
+                    end_hits = (invoice_page.search_for("Invoice No")
+                                or invoice_page.search_for("GSTIN")
+                                or invoice_page.search_for("Order Id:"))
+                    if end_hits:
+                        bottom_y = max(h.y1 for h in end_hits) + 120
                     else:
                         bottom_y = top_y + fixed_invoice_height
 
-                    invoice_rect = fitz.Rect(
+                    rect = fitz.Rect(
                         0,
                         max(0, top_y),
                         invoice_page.rect.width,
                         min(invoice_page.rect.height, bottom_y)
                     )
-                    invoice_page.set_cropbox(invoice_rect)
+                    invoice_page.set_mediabox(rect)   # <- HARD CROP
                 else:
-                    invoice_page.set_cropbox(invoice_page.rect)  # fallback
+                    # fallback: just take the lower portion of the page
+                    rect = fitz.Rect(
+                        0, invoice_page.rect.height/2,
+                        invoice_page.rect.width, invoice_page.rect.height
+                    )
+                    invoice_page.set_mediabox(rect)
 
             else:
-                # Only label
+                # only label
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
                 label_page = result[-1]
-
-                text_instances = label_page.search_for("Order Id:")
-                if text_instances:
-                    label_rect = fitz.Rect(
-                        185, 15,
-                        label_page.rect.width - 185,
-                        text_instances[0].y0 - 10
-                    )
-                    label_page.set_cropbox(label_rect)
+                try:
+                    hits = label_page.search_for("Order Id:")
+                    if hits:
+                        bottom_y = hits[0].y0 - 10
+                        rect = fitz.Rect(
+                            185, 15,
+                            label_page.rect.width - 185,
+                            max(0, bottom_y)
+                        )
+                        label_page.set_mediabox(rect)
+                except Exception:
+                    pass
 
                 if config.get("add_date_on_top", False):
                     label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
@@ -263,10 +277,11 @@ def pdf_cropper(pdf_path, config, temp_path):
             result.insert_pdf(doc, from_page=page_no, to_page=page_no)
 
     doc.close()
-    output_filename = os.path.join(temp_path, "cropped_final.pdf")
-    result.save(output_filename, garbage=4, deflate=True, clean=True)
+    out_path = os.path.join(temp_path, "cropped_final.pdf")
+    result.save(out_path, garbage=4, deflate=True, clean=True)
     result.close()
-    return output_filename
+    return out_path
+
 # ---------------------- Create Count Excel (Formatted like second script) ----------------------
 def create_count_excel(df, output_path):
     df["sku"] = df["sku"].astype(str).str.strip().replace({"nan": "", "None": ""})
