@@ -186,10 +186,6 @@ def pdf_whitespace(pdf_path, temp_path):
     return save_path
     
 def pdf_cropper(pdf_path, config, temp_path):
-    from datetime import datetime
-    import fitz
-    import os
-    from tqdm import tqdm
 
     now = datetime.now()
     formatted_datetime = now.strftime("%d-%m-%y %I:%M %p")
@@ -261,7 +257,6 @@ def pdf_cropper(pdf_path, config, temp_path):
     result.save(output_filename, garbage=4, deflate=True, clean=True)
     result.close()
     return output_filename
-
 
 # ---------------------- Create Count Excel (Formatted like second script) ----------------------
 def create_count_excel(df, output_path):
