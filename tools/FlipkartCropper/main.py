@@ -86,9 +86,9 @@ def process_folder(input_path, output_path):
             writer_output.write(sorted_pdf_path)
             print(f"Sorted PDF created -> {sorted_pdf_path}")
 
-            # Process PDF (crop only)
-            cropped_pdf_path = pdf_cropper(sorted_pdf_path, config, temp_path)
-
+            # Process PDF (whitespace + crop)
+            whitespace_pdf_path = pdf_whitespace(sorted_pdf_path, temp_path)
+            cropped_pdf_path = pdf_cropper(whitespace_pdf_path, config, temp_path)
 
             # Save final PDF to output folder
             final_name = f"result_pdf_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
