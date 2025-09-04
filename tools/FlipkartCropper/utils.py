@@ -184,20 +184,20 @@ def pdf_whitespace(pdf_path, temp_path):
     doc.save(save_path, garbage=4, deflate=True, clean=True)
     doc.close()
     return save_path
-
+    
 def pdf_cropper(pdf_path, config, temp_path):
     now = datetime.now()
     formatted_datetime = now.strftime("%d-%m-%y %I:%M %p")
     doc = fitz.open(pdf_path)
     result = fitz.open()
 
-    padding = 5              # little space around crop
-    fixed_invoice_height = 500  # fallback
+    padding = 5
+    fixed_invoice_height = 500  
 
     for page_no in tqdm(range(len(doc)), desc="Cropping pages"):
         try:
             if config.get("keep_invoice", False):
-                # Insert full page twice: first = Label, second = Invoice
+                # Insert full page twice
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
 
@@ -217,29 +217,29 @@ def pdf_cropper(pdf_path, config, temp_path):
                 if config.get("add_date_on_top", False):
                     label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
-                # ---- CROP INVOICE (tight below "Tax Invoice") ----
-                text_instances = invoice_page.search_for("Tax Invoice") or invoice_page.search_for("TAX INVOICE")
-                if text_instances:
-                    # take first occurrence
-                    rect = text_instances[0]
+                # ---- CROP INVOICE ----
+                start = invoice_page.search_for("Tax Invoice") or invoice_page.search_for("TAX INVOICE")
+                if start:
+                    top_y = start[0].y0 - padding
+
+                    # look for bottom markers
+                    end = (invoice_page.search_for("Invoice No") or
+                           invoice_page.search_for("GSTIN") or
+                           invoice_page.search_for("Order Id:"))
+                    if end:
+                        bottom_y = max([r.y1 for r in end]) + 100  # extend a bit
+                    else:
+                        bottom_y = top_y + fixed_invoice_height
 
                     invoice_rect = fitz.Rect(
                         0,
-                        rect.y0 - padding,  # start at "Tax Invoice"
+                        max(0, top_y),
                         invoice_page.rect.width,
-                        min(invoice_page.rect.height, rect.y0 + fixed_invoice_height)
+                        min(invoice_page.rect.height, bottom_y)
                     )
                     invoice_page.set_cropbox(invoice_rect)
                 else:
-                    # fallback: take lower half of page
-                    invoice_page.set_cropbox(
-                        fitz.Rect(
-                            0,
-                            invoice_page.rect.height / 2,
-                            invoice_page.rect.width,
-                            invoice_page.rect.height
-                        )
-                    )
+                    invoice_page.set_cropbox(invoice_page.rect)  # fallback
 
             else:
                 # Only label
@@ -267,7 +267,6 @@ def pdf_cropper(pdf_path, config, temp_path):
     result.save(output_filename, garbage=4, deflate=True, clean=True)
     result.close()
     return output_filename
-
 # ---------------------- Create Count Excel (Formatted like second script) ----------------------
 def create_count_excel(df, output_path):
     df["sku"] = df["sku"].astype(str).str.strip().replace({"nan": "", "None": ""})
