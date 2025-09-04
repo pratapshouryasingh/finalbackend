@@ -184,59 +184,94 @@ def pdf_whitespace(pdf_path, temp_path):
     doc.save(save_path, garbage=4, deflate=True, clean=True)
     doc.close()
     return save_path
-import fitz  # PyMuPDF
+
+import fitz
+import os
 from datetime import datetime
 from tqdm import tqdm
-import os
-
 
 def pdf_cropper(pdf_path, config, temp_path):
-    """
-    Crop Flipkart invoices into full invoice pages (top → 'Ordered through Flipkart').
-    Keeps all invoice details including Sold By, Shipping, Billing, GST, PAN, etc.
-    """
-
     now = datetime.now()
     formatted_datetime = now.strftime("%d-%m-%y %I:%M %p")
-
     doc = fitz.open(pdf_path)
     result = fitz.open()
 
+    padding = 5              # little space around crop
+    fixed_invoice_height = 500  # fallback
+
     for page_no in tqdm(range(len(doc)), desc="Cropping pages"):
         try:
-            page = doc[page_no]
-            rect = page.rect  # full page rectangle
+            if config.get("keep_invoice", False):
+                # Insert full page twice: first = Label, second = Invoice
+                result.insert_pdf(doc, from_page=page_no, to_page=page_no)
+                result.insert_pdf(doc, from_page=page_no, to_page=page_no)
 
-            # Search for "Ordered through" text
-            search_text = "Ordered through"
-            found = page.search_for(search_text)
+                label_page = result[-2]
+                invoice_page = result[-1]
 
-            if found:
-                # Take everything from top until just after "Ordered through"
-                top_rect = fitz.Rect(rect.x0, rect.y0, rect.x1, found[0].y1 + 50)
+                # ---- CROP LABEL ----
+                text_instances = label_page.search_for("Order Id:")
+                if text_instances:
+                    label_rect = fitz.Rect(
+                        185, 15,
+                        label_page.rect.width - 185,
+                        text_instances[0].y0 - 10
+                    )
+                    label_page.set_cropbox(label_rect)
+
+                if config.get("add_date_on_top", False):
+                    label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
+
+                # ---- CROP INVOICE (tight below "Tax Invoice") ----
+                text_instances = invoice_page.search_for("Tax Invoice") or invoice_page.search_for("TAX INVOICE")
+                if text_instances:
+                    # take first occurrence
+                    rect = text_instances[0]
+
+                    invoice_rect = fitz.Rect(
+                        0,
+                        rect.y0 - padding,  # start at "Tax Invoice"
+                        invoice_page.rect.width,
+                        min(invoice_page.rect.height, rect.y0 + fixed_invoice_height)
+                    )
+                    invoice_page.set_cropbox(invoice_rect)
+                else:
+                    # fallback: take lower half of page
+                    invoice_page.set_cropbox(
+                        fitz.Rect(
+                            0,
+                            invoice_page.rect.height / 2,
+                            invoice_page.rect.width,
+                            invoice_page.rect.height
+                        )
+                    )
+
             else:
-                # If not found, fallback to full page
-                top_rect = rect
+                # Only label
+                result.insert_pdf(doc, from_page=page_no, to_page=page_no)
+                label_page = result[-1]
 
-            # Add cropped page
-            pix = page.get_pixmap(clip=top_rect, dpi=200)
-            img_pdf = fitz.open()
-            img_pdf.insert_page(0, width=pix.width, height=pix.height)
-            img_page = img_pdf[0]
-            img_page.insert_image(img_page.rect, pixmap=pix)
-            result.insert_pdf(img_pdf)
+                text_instances = label_page.search_for("Order Id:")
+                if text_instances:
+                    label_rect = fitz.Rect(
+                        185, 15,
+                        label_page.rect.width - 185,
+                        text_instances[0].y0 - 10
+                    )
+                    label_page.set_cropbox(label_rect)
+
+                if config.get("add_date_on_top", False):
+                    label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
         except Exception as e:
-            print(f"❌ Error cropping page {page_no}: {e}")
+            print(f"⚠️ Error cropping page {page_no}: {e}")
+            result.insert_pdf(doc, from_page=page_no, to_page=page_no)
 
-    # Save result
-    output_path = os.path.join(temp_path, f"cropped_{formatted_datetime}.pdf")
-    result.save(output_path, deflate=True)
-    result.close()
     doc.close()
-
-    return output_path
-
+    output_filename = os.path.join(temp_path, "cropped_final.pdf")
+    result.save(output_filename, garbage=4, deflate=True, clean=True)
+    result.close()
+    return output_filename
 
 # ---------------------- Create Count Excel (Formatted like second script) ----------------------
 def create_count_excel(df, output_path):
