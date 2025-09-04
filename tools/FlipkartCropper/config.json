@@ -1,9 +1,8 @@
 {
+  "courier_sort": true,
+  "sku_sort": true,
+  "soldBy_sort": true,
+  "add_date_on_top": true,
   "keep_invoice": true,
-  "add_date_on_top": false,
-  "invoice_height": 900,
-  "padding": 6,
-  "sku_sort": false,
-  "courier_sort": false,
-  "soldBy_sort": false
+  "sku_order_count": true
 }
