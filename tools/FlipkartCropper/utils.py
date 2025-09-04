@@ -185,35 +185,20 @@ def pdf_whitespace(pdf_path, temp_path):
     doc.close()
     return save_path
 
-
-
 def pdf_cropper(pdf_path, config, temp_path):
-    """
-    Crops shipping label and/or tax invoice from a given PDF.
-
-    Args:
-        pdf_path (str): Path to the input PDF.
-        config (dict): Options for cropping. Supported keys:
-            - keep_invoice (bool): If True, saves both label + invoice per page.
-            - add_date_on_top (bool): If True, adds timestamp on top of label.
-            - padding (int): Extra pixels above/below crops. Default=10.
-        temp_path (str): Directory to save the cropped PDF.
-
-    Returns:
-        str: Path to the output cropped PDF.
-    """
     now = datetime.now()
     formatted_datetime = now.strftime("%d-%m-%y %I:%M %p")
-
-    padding = config.get("padding", 10)
-
     doc = fitz.open(pdf_path)
     result = fitz.open()
+
+    # you can tweak this
+    fixed_invoice_height = 500  
+    padding = 0  
 
     for page_no in tqdm(range(len(doc)), desc="Cropping pages"):
         try:
             if config.get("keep_invoice", False):
-                # Insert full page twice → first = Label, second = Invoice
+                # Insert full page twice: first = Label, second = Invoice
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
 
@@ -223,44 +208,43 @@ def pdf_cropper(pdf_path, config, temp_path):
                 # ---- CROP LABEL ----
                 text_instances = label_page.search_for("Order Id:")
                 if text_instances:
-                    bottom_y = text_instances[0].y0 - padding
                     label_rect = fitz.Rect(
                         185, 15,
                         label_page.rect.width - 185,
-                        max(0, bottom_y)
+                        text_instances[0].y0 - 10
                     )
                     label_page.set_cropbox(label_rect)
 
                 if config.get("add_date_on_top", False):
                     label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
-                # ---- CROP INVOICE ----
+                # ---- CROP INVOICE (fixed height from Tax Invoice) ----
                 text_instances = invoice_page.search_for("Tax Invoice") or invoice_page.search_for("TAX INVOICE")
                 if text_instances:
                     top_y = min([rect.y0 for rect in text_instances]) - padding
+
                     invoice_rect = fitz.Rect(
                         0,
                         max(0, top_y),
                         invoice_page.rect.width,
-                        invoice_page.rect.height
+                        min(invoice_page.rect.height, top_y + fixed_invoice_height)
                     )
                     invoice_page.set_cropbox(invoice_rect)
                 else:
-                    # fallback = full page
+                    # fallback (if Tax Invoice not found)
                     invoice_page.set_cropbox(invoice_page.rect)
 
             else:
-                # Only keep label
+                # Only label
                 result.insert_pdf(doc, from_page=page_no, to_page=page_no)
                 label_page = result[-1]
 
                 text_instances = label_page.search_for("Order Id:")
                 if text_instances:
-                    bottom_y = text_instances[0].y0 - padding
                     label_rect = fitz.Rect(
                         185, 15,
                         label_page.rect.width - 185,
-                        max(0, bottom_y)
+                        text_instances[0].y0 - 10
                     )
                     label_page.set_cropbox(label_rect)
 
@@ -271,18 +255,11 @@ def pdf_cropper(pdf_path, config, temp_path):
             print(f"⚠️ Error cropping page {page_no}: {e}")
             result.insert_pdf(doc, from_page=page_no, to_page=page_no)
 
-    # Save cropped PDF
     doc.close()
     output_filename = os.path.join(temp_path, "cropped_final.pdf")
     result.save(output_filename, garbage=4, deflate=True, clean=True)
     result.close()
     return output_filename
-
-
-# Example usage:
-# config = {"keep_invoice": True, "add_date_on_top": True, "padding": 15}
-# cropped = pdf_cropper("input.pdf", config, ".")
-# print("✅ Cropped file saved at:", cropped)
 
 
 # ---------------------- Create Count Excel (Formatted like second script) ----------------------
