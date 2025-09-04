@@ -227,7 +227,7 @@ def pdf_cropper(pdf_path, config, temp_path):
                            invoice_page.search_for("GSTIN") or
                            invoice_page.search_for("Order Id:"))
                     if end:
-                        bottom_y = max([r.y1 for r in end]) + 100  # extend a bit
+                        bottom_y = max([r.y1 for r in end]) + 300  # extend a bit
                     else:
                         bottom_y = top_y + fixed_invoice_height
 
