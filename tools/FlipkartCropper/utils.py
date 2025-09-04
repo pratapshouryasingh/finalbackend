@@ -186,13 +186,15 @@ def pdf_whitespace(pdf_path, temp_path):
     return save_path
     
 def pdf_cropper(pdf_path, config, temp_path):
+    from datetime import datetime
+    import fitz
+    import os
+    from tqdm import tqdm
+
     now = datetime.now()
     formatted_datetime = now.strftime("%d-%m-%y %I:%M %p")
     doc = fitz.open(pdf_path)
     result = fitz.open()
-
-    padding = 8
-    fixed_invoice_height = 800  
 
     for page_no in tqdm(range(len(doc)), desc="Cropping pages"):
         try:
@@ -217,25 +219,17 @@ def pdf_cropper(pdf_path, config, temp_path):
                 if config.get("add_date_on_top", False):
                     label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
-                # ---- CROP INVOICE ----
-                start = invoice_page.search_for("Tax Invoice") or invoice_page.search_for("TAX INVOICE")
+                # ---- CROP INVOICE (full invoice like Image 2) ----
+                start = (invoice_page.search_for("Tax Invoice") or
+                         invoice_page.search_for("TAX INVOICE"))
                 if start:
-                    top_y = start[0].y0 + padding
-
-                    # look for bottom markers
-                    end = (invoice_page.search_for("Invoice No") or
-                           invoice_page.search_for("GSTIN") or
-                           invoice_page.search_for("Order Id:"))
-                    if end:
-                        bottom_y = max([r.y1 for r in end]) + 200  # extend a bit
-                    else:
-                        bottom_y = top_y + fixed_invoice_height
+                    top_y = max(0, start[0].y0 - 20)  # small margin above header
 
                     invoice_rect = fitz.Rect(
                         0,
-                        max(0, top_y),
+                        top_y,
                         invoice_page.rect.width,
-                        min(invoice_page.rect.height, bottom_y)
+                        invoice_page.rect.height  # extend fully to bottom
                     )
                     invoice_page.set_cropbox(invoice_rect)
                 else:
@@ -267,6 +261,7 @@ def pdf_cropper(pdf_path, config, temp_path):
     result.save(output_filename, garbage=4, deflate=True, clean=True)
     result.close()
     return output_filename
+
 
 # ---------------------- Create Count Excel (Formatted like second script) ----------------------
 def create_count_excel(df, output_path):
