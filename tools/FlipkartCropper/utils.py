@@ -191,8 +191,8 @@ def pdf_cropper(pdf_path, config, temp_path):
     doc = fitz.open(pdf_path)
     result = fitz.open()
 
-    padding = 5
-    fixed_invoice_height = 500  
+    padding = 8
+    fixed_invoice_height = 800  
 
     for page_no in tqdm(range(len(doc)), desc="Cropping pages"):
         try:
