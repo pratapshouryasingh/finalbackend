@@ -215,10 +215,12 @@ def pdf_cropper(pdf_path, config, temp_path):
                     label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
                 # ---- CROP INVOICE (from TAX INVOICE downwards) ----
-                text_instances = invoice_page.search_for("TAX INVOICE")
+                text_instances = invoice_page.search_for("Tax Invoice") or invoice_page.search_for("TAX INVOICE")
                 if text_instances:
+                    # Take the top-most match in case "TAX" and "INVOICE" are split
+                    top_y = min([rect.y0 for rect in text_instances])
                     invoice_rect = fitz.Rect(
-                        0, text_instances[0].y1 - 10,
+                        0, top_y - 20,   # add margin so heading is included
                         invoice_page.rect.width,
                         invoice_page.rect.height
                     )
