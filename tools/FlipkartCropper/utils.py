@@ -191,9 +191,8 @@ def pdf_cropper(pdf_path, config, temp_path):
     doc = fitz.open(pdf_path)
     result = fitz.open()
 
-    # you can tweak this
-    fixed_invoice_height = 500  
-    padding = 0  
+    padding = 5              # little space around crop
+    fixed_invoice_height = 500  # fallback
 
     for page_no in tqdm(range(len(doc)), desc="Cropping pages"):
         try:
@@ -218,21 +217,29 @@ def pdf_cropper(pdf_path, config, temp_path):
                 if config.get("add_date_on_top", False):
                     label_page.insert_text(fitz.Point(12, 10), formatted_datetime, fontsize=11)
 
-                # ---- CROP INVOICE (fixed height from Tax Invoice) ----
+                # ---- CROP INVOICE (tight below "Tax Invoice") ----
                 text_instances = invoice_page.search_for("Tax Invoice") or invoice_page.search_for("TAX INVOICE")
                 if text_instances:
-                    top_y = min([rect.y0 for rect in text_instances]) - padding
+                    # take first occurrence
+                    rect = text_instances[0]
 
                     invoice_rect = fitz.Rect(
                         0,
-                        max(0, top_y),
+                        rect.y0 - padding,  # start at "Tax Invoice"
                         invoice_page.rect.width,
-                        min(invoice_page.rect.height, top_y + fixed_invoice_height)
+                        min(invoice_page.rect.height, rect.y0 + fixed_invoice_height)
                     )
                     invoice_page.set_cropbox(invoice_rect)
                 else:
-                    # fallback (if Tax Invoice not found)
-                    invoice_page.set_cropbox(invoice_page.rect)
+                    # fallback: take lower half of page
+                    invoice_page.set_cropbox(
+                        fitz.Rect(
+                            0,
+                            invoice_page.rect.height / 2,
+                            invoice_page.rect.width,
+                            invoice_page.rect.height
+                        )
+                    )
 
             else:
                 # Only label
@@ -260,7 +267,6 @@ def pdf_cropper(pdf_path, config, temp_path):
     result.save(output_filename, garbage=4, deflate=True, clean=True)
     result.close()
     return output_filename
-
 
 # ---------------------- Create Count Excel (Formatted like second script) ----------------------
 def create_count_excel(df, output_path):
