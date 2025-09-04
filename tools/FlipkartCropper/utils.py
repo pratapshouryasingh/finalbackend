@@ -219,10 +219,10 @@ def pdf_cropper(pdf_path, config, temp_path):
                 if text_instances:
                     # Take the top-most match in case "TAX" and "INVOICE" are split
                     top_y = min([rect.y0 for rect in text_instances])
-                    invoice_rect = fitz.Rect(
-                        0, top_y - 20,   # add margin so heading is included
-                        invoice_page.rect.width,
-                        invoice_page.rect.height
+                         invoice_rect = fitz.Rect(
+                         0, top_y,   # start exactly from "Tax Invoice"
+                         invoice_page.rect.width,
+                         invoice_page.rect.height
                     )
                     invoice_page.set_cropbox(invoice_rect)
                 else:
