@@ -3,7 +3,11 @@ import json
 import sys
 import shutil
 import os
-from pdfrw import PdfReader, PdfWriter
+import re
+import pandas as pd
+from tqdm import tqdm
+import fitz  # PyMuPDF
+from datetime import datetime
 from pdfminer.converter import TextConverter
 from pdfminer.layout import LAParams
 from pdfminer.pdfdocument import PDFDocument
@@ -11,11 +15,6 @@ from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
 from io import StringIO
-import re
-import pandas as pd
-from tqdm import tqdm
-import fitz
-from datetime import datetime
 
 # ---------------------- Check Server Status ----------------------
 def check_status():
@@ -63,7 +62,7 @@ def read_config():
     try:
         with open("config.json", "r") as f:
             config = json.load(f)
-            # Merge with defaults to ensure all keys exist
+            # Merge with defaults
             for key in default_config:
                 if key not in config:
                     config[key] = default_config[key]
@@ -72,14 +71,18 @@ def read_config():
         print("Using default config")
         return default_config
 
-# ---------------------- Merge PDFs ----------------------
+# ---------------------- Merge PDFs (fitz only) ----------------------
 def pdf_merger(all_path, save_path):
-    writer = PdfWriter()
+    result = fitz.open()
     for path in all_path:
-        reader = PdfReader(path)
-        for page in reader.pages:
-            writer.addpage(page)
-    writer.write(save_path)
+        try:
+            doc = fitz.open(path)
+            result.insert_pdf(doc)
+            doc.close()
+        except Exception as e:
+            print(f"Error merging {path}: {e}")
+    result.save(save_path, garbage=4, deflate=True, clean=True)
+    result.close()
 
 # ---------------------- Convert PDF to Text ----------------------
 def convert_pdf_to_string(file_path):
@@ -96,171 +99,101 @@ def convert_pdf_to_string(file_path):
                 interpreter = PDFPageInterpreter(rsrcmgr, device)
                 interpreter.process_page(page)
                 
-                # Clean up the extracted text
+                # Clean up
                 text = output_string.getvalue()
-                text = re.sub(r'\s+', ' ', text)  # Replace multiple spaces with single space
-                text = text.replace('\x00', '')   # Remove null characters
+                text = re.sub(r'\s+', ' ', text)
+                text = text.replace('\x00', '')
                 all_page.append(text)
     except Exception as e:
         print(f"Error converting PDF to text: {e}")
     
     return all_page
+
 # ---------------------- Extraction Helpers ----------------------
 def quantity_extract(page):
     try:
-        # Look for quantity patterns
         patterns = [
             r"Qty[:\s]*(\d+)",
             r"Quantity[:\s]*(\d+)",
             r"Shipment Qty[:\s]*(\d+)",
             r"QTY[:\s]*(\d+)"
         ]
-        
         for pattern in patterns:
             match = re.search(pattern, page, re.IGNORECASE)
             if match:
                 qty = int(match.group(1))
-                return qty, qty > 1  # Return quantity and whether it's multiple
-        
-        # If no pattern found, try to find numbers near "Qty"
-        lines = page.split('\n')
-        for i, line in enumerate(lines):
-            if "qty" in line.lower():
-                # Look for numbers in this line or next line
-                numbers = re.findall(r'\d+', line)
-                if numbers:
-                    qty = int(numbers[0])
-                    return qty, qty > 1
-                
-                # Check next line if available
-                if i + 1 < len(lines):
-                    numbers = re.findall(r'\d+', lines[i + 1])
-                    if numbers:
-                        qty = int(numbers[0])
-                        return qty, qty > 1
-        
+                return qty, qty > 1
         return 1, False
     except:
         return 1, False
 
 def sku_extract(page):
     try:
-        # Look for SKU patterns
         patterns = [
             r"SKU[:\s]*([A-Za-z0-9\-]+)",
             r"Shipment SKU[:\s]*([A-Za-z0-9\-]+)",
             r"Item Code[:\s]*([A-Za-z0-9\-]+)",
             r"Product Code[:\s]*([A-Za-z0-9\-]+)"
         ]
-        
         for pattern in patterns:
             match = re.search(pattern, page, re.IGNORECASE)
             if match:
                 return match.group(1).strip()
-        
-        # If no pattern found, try to find alphanumeric codes near "SKU"
-        lines = page.split('\n')
-        for i, line in enumerate(lines):
-            if "sku" in line.lower():
-                # Look for alphanumeric codes in this line
-                codes = re.findall(r'[A-Za-z0-9\-]{5,}', line)
-                if codes:
-                    return codes[0]
-                
-                # Check next line if available
-                if i + 1 < len(lines):
-                    codes = re.findall(r'[A-Za-z0-9\-]{5,}', lines[i + 1])
-                    if codes:
-                        return codes[0]
-        
         return ""
     except:
         return ""
 
 def courier_extract(page):
     try:
-        # Look for courier patterns
         patterns = [
             r"Shipping Agent[:\s]*([A-Za-z\s]+)",
             r"Courier[:\s]*([A-Za-z\s]+)",
             r"Delivery Partner[:\s]*([A-Za-z\s]+)",
             r"Pickup[:\s]*([A-Za-z\s]+)"
         ]
-        
         for pattern in patterns:
             match = re.search(pattern, page, re.IGNORECASE)
             if match:
-                courier = match.group(1).strip()
-                courier = courier.lower()
+                courier = match.group(1).strip().lower()
                 if courier in ["c", "lsh-r0", "lhs-r0", ""]:
                     return "valmo"
                 return courier
-        
-        # If no pattern found, look for courier names in the text
-        courier_keywords = {
-            'delhivery': 'delhivery',
-            'dhl': 'dhl',
-            'fedex': 'fedex',
-            'bluedart': 'bluedart',
-            'ekart': 'ekart',
-            'xpressbees': 'xpressbees',
-            'shadowfax': 'shadowfax',
-            'valmo': 'valmo'
-        }
-        
-        page_lower = page.lower()
-        for keyword, courier_name in courier_keywords.items():
-            if keyword in page_lower:
-                return courier_name
-        
         return ""
     except:
         return ""
 
 def soldBy_extract(page):
     try:
-        # Look for seller patterns
         patterns = [
             r"Sold By[:\s]*([A-Za-z\s]+)",
             r"Seller[:\s]*([A-Za-z\s]+)",
             r"Vendor[:\s]*([A-Za-z\s]+)",
             r"Merchant[:\s]*([A-Za-z\s]+)"
         ]
-        
         for pattern in patterns:
             match = re.search(pattern, page, re.IGNORECASE)
             if match:
                 return match.group(1).strip()
-        
-        # Look for "If undelivered, return to:" pattern
-        return_match = re.search(r"If undelivered, return to:[:\s]*([^\n]+)", page, re.IGNORECASE)
-        if return_match:
-            return return_match.group(1).strip()
-        
         return ""
     except:
         return ""
 
 def size_extract(page):
-    page = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\xff]", "", page)
-    page = page.split("\n")
-    page = [x for x in page if len(x) != 0]
     try:
-        courier_idx = [x for x in range(len(page)) if "Size" in page[x]][0]
-        return page[courier_idx + 1]
+        lines = [x for x in page.split("\n") if len(x) != 0]
+        courier_idx = [x for x in range(len(lines)) if "Size" in lines[x]][0]
+        return lines[courier_idx + 1]
     except:
         return ""
 
 def color_extract(page):
-    page = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\xff]", "", page)
-    page = page.split("\n")
-    page = [x for x in page if len(x) != 0]
     try:
-        courier_idx = [x for x in range(len(page)) if "Color" in page[x]][0]
-        return page[courier_idx + 1]
+        lines = [x for x in page.split("\n") if len(x) != 0]
+        courier_idx = [x for x in range(len(lines)) if "Color" in lines[x]][0]
+        return lines[courier_idx + 1]
     except:
         return ""
-    
+
 def extract_data(text):
     df = pd.DataFrame()
     error_pages = []
@@ -274,35 +207,29 @@ def extract_data(text):
             soldBy = soldBy_extract(page)
             size = size_extract(page)
             color = color_extract(page)
-            df_dictionary = pd.DataFrame(
-                [
-                    {
-                        "page": idx,
-                        "sku": sku,
-                        "qty": qty,
-                        "multi": mqty,
-                        "courier": courier,
-                        "soldBy": soldBy,
-                        "size": size,
-                        "color": color,
-                    }
-                ]
-            )
+            df_dictionary = pd.DataFrame([{
+                "page": idx,
+                "sku": sku,
+                "qty": qty,
+                "multi": mqty,
+                "courier": courier,
+                "soldBy": soldBy,
+                "size": size,
+                "color": color,
+            }])
             df = pd.concat([df, df_dictionary], ignore_index=True)
         except Exception as e:
             print(f"Error extracting data from page {idx}: {e}")
-    
     if len(error_pages) != 0:
         print(f"Found {len(error_pages)} pages with extraction errors")
-    
     return df
 
+# ---------------------- PDF Whitespace ----------------------
 def pdf_whitespace(pdf_path):
     doc = fitz.open(pdf_path)
     for page_no in tqdm(range(len(doc))):
         try:
             page = doc[page_no]
-            # Try to find the bottom of the label area
             text_instances = page.search_for("for online payments (as applicable)")
             if text_instances:
                 crop_y = text_instances[0].y0 + 20
@@ -310,19 +237,16 @@ def pdf_whitespace(pdf_path):
                 page.set_cropbox(page_crop_rect)
         except Exception as e:
             print(f"Error cropping whitespace on page {page_no}: {e}")
-    
     save_path = pdf_path.replace(".pdf", "_whitespace.pdf")
     doc.save(save_path, garbage=4, deflate=True, clean=True)
     doc.close()
     return save_path
 
+# ---------------------- PDF Cropper ----------------------
 def pdf_cropper(pdf_path, config, df=None):
     import fitz
-    import cv2
-    import numpy as np
     from datetime import datetime
     from tqdm import tqdm
-    import os
 
     # Base width/height
     FIXED_WIDTH = 3.5 * 72
@@ -342,32 +266,33 @@ def pdf_cropper(pdf_path, config, df=None):
     for page_no in tqdm(range(len(main))):
         page = main[page_no]
 
-        # Render page
-        pix = page.get_pixmap(dpi=150, alpha=False)
-        img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
+        # Detect content bounding box (union of all text & image bboxes)
+        rects = []
 
-        # Detect content area
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (3, 3), 0)
-        _, thresh = cv2.threshold(gray, 240, 255, cv2.THRESH_BINARY_INV)
-        coords = cv2.findNonZero(thresh)
+        # Text blocks
+        for b in page.get_text("blocks"):
+            rects.append(fitz.Rect(b[:4]))
 
-        if coords is not None:
-            x, y, w, h = cv2.boundingRect(coords)
-            x = max(x - 3, 0)
-            y = max(y - 3, 0)
+        # Images
+        for img in page.get_images(full=True):
+            xref = img[0]
+            try:
+                rect = page.get_image_bbox(xref)
+                rects.append(rect)
+            except:
+                pass
 
-            scale_x = page.rect.width / pix.width
-            scale_y = page.rect.height / pix.height
+        if rects:
+            # Union of all rects
+            bbox = rects[0]
+            for r in rects[1:]:
+                bbox |= r
 
-            min_x = x * scale_x
-            min_y = y * scale_y
+            min_x, min_y, max_x, max_y = bbox
 
-            max_x = min_x + FIXED_WIDTH - REDUCE_RIGHT_MARGIN
-            max_y = min_y + FIXED_HEIGHT + EXTRA_HEIGHT
-
-            max_x = min(max_x, page.rect.width)
-            max_y = min(max_y, page.rect.height)
+            # Adjust dimensions
+            max_x = min(min_x + FIXED_WIDTH - REDUCE_RIGHT_MARGIN, page.rect.width)
+            max_y = min(min_y + FIXED_HEIGHT + EXTRA_HEIGHT, page.rect.height)
 
             crop_rect = fitz.Rect(min_x, min_y, max_x, max_y)
 
@@ -376,7 +301,7 @@ def pdf_cropper(pdf_path, config, df=None):
             new_height = crop_rect.height + EXTRA_TOP_MARGIN
             new_page = result.new_page(width=new_width, height=new_height)
 
-            # Show cropped content slightly lower (to create top margin)
+            # Show cropped content
             new_page.show_pdf_page(
                 fitz.Rect(0, EXTRA_TOP_MARGIN, crop_rect.width, crop_rect.height + EXTRA_TOP_MARGIN),
                 main,
@@ -392,47 +317,39 @@ def pdf_cropper(pdf_path, config, df=None):
                     fontsize=9
                 )
         else:
+            # If no content detected, insert original page
             result.insert_pdf(main, from_page=page_no, to_page=page_no)
 
     main.close()
 
-    # Create a new output path instead of modifying the original
     cropped_path = pdf_path.replace(".pdf", "_cropped.pdf")
     result.save(cropped_path, garbage=4, deflate=True, clean=True)
     result.close()
-    
-    return cropped_path  # Return the path to the cropped file
 
-import os
-import pandas as pd
-from datetime import datetime
+    return cropped_path
 
+# ---------------------- Excel Report ----------------------
 def create_count_excel(df, output_path="output"):
     os.makedirs(output_path, exist_ok=True)
 
-    # SKU Report
     sku_df = df[["qty", "soldBy", "color", "sku"]].value_counts().reset_index()
     sku_df.columns = ["Qty", "SoldBy", "Color", "SKU", "Count"]
     sku_df["SKU_lower"] = sku_df["SKU"].str.lower()
     sku_df = sku_df.sort_values(by=["Count", "SKU_lower", "Qty"], ascending=[False, True, True])
     sku_df = sku_df.drop(columns=["SKU_lower"]).reset_index(drop=True)
 
-    # Courier+SoldBy Report
     courierSold_df = df[["courier", "soldBy"]].value_counts().reset_index()
     courierSold_df.columns = ["Courier", "SoldBy", "Packages"]
     courierSold_df = courierSold_df.sort_values(by=["Packages", "Courier"], ascending=[False, True]).reset_index(drop=True)
     
-    # Courier Only Report
     courier_df = df[["courier"]].value_counts().reset_index()
     courier_df.columns = ["Courier", "Packages"]
     courier_df = courier_df.sort_values(by=["Packages", "Courier"], ascending=[False, True]).reset_index(drop=True)
 
-    # SoldBy Only Report
     soldby_df = df[["soldBy"]].value_counts().reset_index()
     soldby_df.columns = ["SoldBy", "Packages"]
     soldby_df = soldby_df.sort_values(by=["Packages", "SoldBy"], ascending=[False, True]).reset_index(drop=True)
 
-    # Add date-time to file name
     now_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     summary_path = os.path.join(output_path, f"summary_report_{now_str}.xlsx")
 
@@ -441,15 +358,12 @@ def create_count_excel(df, output_path="output"):
         worksheet = workbook.add_worksheet("Summary")
         writer.sheets["Summary"] = worksheet
 
-        # Formats
         bold_format = workbook.add_format({'bold': True, 'font_size': 12})
         header_format = workbook.add_format({'bold': True, 'bg_color': '#DDEEFF', 'border': 1, 'text_wrap': True})
         wrap_format = workbook.add_format({'text_wrap': True})
         timestamp_format = workbook.add_format({'italic': True, 'font_color': 'gray'})
 
         row = 0
-
-        # Write report generation timestamp at the top
         worksheet.write(row, 0, f"Report Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", timestamp_format)
         row += 2
 
@@ -457,23 +371,18 @@ def create_count_excel(df, output_path="output"):
             nonlocal row
             worksheet.write(row, 0, title, bold_format)
             row += 1
-
             for col_num, value in enumerate(df_block.columns):
                 worksheet.write(row, col_num, value, header_format)
-
             row += 1
             for r in df_block.values:
                 for col_num, value in enumerate(r):
                     worksheet.write(row, col_num, value, wrap_format)
                 row += 1
-
-            # Adjust column widths
             for i, col in enumerate(df_block.columns):
                 max_len = max([len(str(col))] + [len(str(val)) for val in df_block[col]])
                 worksheet.set_column(i, i, min(max_len + 2, 30))
             row += 2
 
-        # Write all blocks
         write_block("SKU REPORT", sku_df)
         write_block("COURIER + SOLD BY REPORT", courierSold_df)
         write_block("COURIER", courier_df)
@@ -481,4 +390,3 @@ def create_count_excel(df, output_path="output"):
 
     print("summary report generated at", summary_path)
     return summary_path
-
