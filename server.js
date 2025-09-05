@@ -8,6 +8,7 @@ import fsp from "fs/promises";
 import { spawn } from "child_process";
 import mongoose from "mongoose";
 import History from "./historyModel.js";
+import os from "os";
 
 dotenv.config();
 
@@ -117,9 +118,12 @@ function runPython({ inputDir, outputDir, toolsRoot }) {
       args.push("--config", configPath);
     }
 
-    console.log(`🐍 Running Python: python3 ${mainPy} ${args.join(" ")}`);
+    // ✅ Choose correct Python command per OS
+    const pythonCmd = process.platform === "win32" ? "python" : "python3";
 
-    const child = spawn("python3", [mainPy, ...args], { cwd: toolsRoot });
+    console.log(`🐍 Running Python: ${pythonCmd} ${mainPy} ${args.join(" ")}`);
+
+    const child = spawn(pythonCmd, [mainPy, ...args], { cwd: toolsRoot });
 
     let stdout = "",
       stderr = "";
@@ -149,6 +153,7 @@ function runPython({ inputDir, outputDir, toolsRoot }) {
     });
   });
 }
+
 
 // Wait for output files (PDF + Excel)
 async function waitForOutputs(dir, timeoutMs = 120000) {
