@@ -151,7 +151,7 @@ function runPython({ inputDir, outputDir, toolsRoot }) {
 }
 
 // Wait for output files (PDF + Excel)
-async function waitForOutputs(dir, timeoutMs = 600000) { // 10 minutes timeout
+async function waitForOutputs(dir, timeoutMs = 120000) {
   const start = Date.now();
   console.log(`⏳ Waiting for outputs in: ${dir}`);
   
@@ -182,26 +182,30 @@ async function waitForOutputs(dir, timeoutMs = 600000) { // 10 minutes timeout
   throw new Error("No output files generated within timeout");
 }
 
-// --- Modified processTool for async jobs ---
+// Generic processor
 async function processTool(toolName, req, res) {
+  let inputDir;
   try {
-    const { userId, settings } = req.body;
+    const { userId, settings } = req.body; // 📦 Get userId from request
     if (!req.files || req.files.length === 0)
       return res.status(400).json({ error: "No files uploaded" });
 
+    // Validate tool exists
     const validatedToolName = validateTool(toolName);
-    const { jobId, inputDir, outputDir, toolsRoot } = makeJobDirs(validatedToolName);
+    const { jobId, inputDir: idir, outputDir, toolsRoot } = makeJobDirs(validatedToolName);
+    inputDir = idir;
 
-    console.log(`🛠️ Queued ${validatedToolName} job: ${jobId}`);
+    console.log(`🛠️ Processing ${validatedToolName} job: ${jobId} with ${req.files.length} files`);
 
-    // Override config if provided
+    // Override config if settings sent (original approach that worked locally)
     if (settings) {
       try {
-        const parsedSettings = typeof settings === "string" ? JSON.parse(settings) : settings;
+        const parsedSettings = typeof settings === 'string' ? JSON.parse(settings) : settings;
         const configPath = path.join(toolsRoot, "config.json");
         await fsp.writeFile(configPath, JSON.stringify(parsedSettings, null, 2));
+        console.log(`✅ ${validatedToolName} config.json overridden:`, parsedSettings);
       } catch (e) {
-        console.error("❌ Failed to write config.json:", e);
+        console.error(`❌ Failed to override config.json:`, e);
       }
     }
 
@@ -209,38 +213,74 @@ async function processTool(toolName, req, res) {
     await Promise.all(
       req.files.map(async (f, idx) => {
         const safeName = f.originalname?.replace(/[\\/]/g, "_") || `file_${idx}.pdf`;
-        await fsp.rename(f.path, path.join(inputDir, safeName));
+        const destPath = path.join(inputDir, safeName);
+        await fsp.rename(f.path, destPath);
+        console.log(`📄 Moved file to: ${destPath}`);
       })
     );
 
-    // Save job as pending in DB
-    await History.create({
-      userId,
-      toolName: validatedToolName,
-      jobId,
-      outputs: [],
-      fileCount: req.files.length,
-      status: "pending",
-      timestamp: new Date()
+    // Run Python
+    await runPython({ inputDir, outputDir, toolsRoot });
+
+    // Wait for outputs
+    const files = await waitForOutputs(outputDir);
+
+    // Return both PDF and Excel files separately
+    const apiTool = Object.keys(TOOL_MAP).find((k) => TOOL_MAP[k] === validatedToolName) || validatedToolName.toLowerCase();
+    const outputs = files
+      .filter((f) => f.endsWith(".pdf") || f.endsWith(".xlsx"))
+      .map((name) => ({
+        name,
+        url: `/api/${apiTool}/download/${jobId}/${name}`,
+      }));
+
+    // Save history
+    let updatedHistory = [];
+    if (userId) {
+      try {
+        const historyEntry = new History({ 
+          userId, 
+          toolName: validatedToolName, 
+          jobId, 
+          outputs,
+          fileCount: req.files.length
+        });
+        await historyEntry.save();
+        updatedHistory = await History.find({ userId }).sort({ timestamp: -1 }).limit(10);
+        console.log(`💾 Saved history for user: ${userId}`);
+      } catch (historyError) {
+        console.error("❌ Failed to save history:", historyError);
+      }
+    }
+
+    res.json({ 
+      success: true, 
+      tool: validatedToolName, 
+      jobId, 
+      outputs, 
+      history: updatedHistory,
+      message: `Processed ${req.files.length} files successfully`
     });
-
-    // Run Python in background (do NOT await)
-    runPython({ inputDir, outputDir, toolsRoot })
-      .then(async () => {
-        const files = await waitForOutputs(outputDir, 10 * 60 * 1000); // 10min
-        const apiTool = Object.keys(TOOL_MAP).find((k) => TOOL_MAP[k] === validatedToolName) || validatedToolName.toLowerCase();
-        const outputs = files.map((name) => ({
-          name,
-          url: `/api/${apiTool}/download/${jobId}/${name}`,
-        }));
-        await History.findOneAndUpdate({ jobId }, { status: "done", outputs });
-        console.log(`✅ Job finished: ${jobId}`);
-      })
-      .catch(async (err) => {
-        console.error("❌ Job failed:", err);
-        await History.findOneAndUpdate({ jobId }, { status: "error", error: err.message });
-      });
-
+    
+    console.log(`✅ Completed processing job: ${jobId}`);
+    
+  } catch (err) {
+    console.error(`${toolName} processing error:`, err);
+    res.status(500).json({ 
+      error: String(err.message || err),
+      details: "Check server logs for more information"
+    });
+  } finally {
+    // Clean up input directory
+    if (inputDir && fs.existsSync(inputDir)) {
+      try {
+        await fsp.rm(inputDir, { recursive: true, force: true });
+        console.log(`🗑 Deleted input folder: ${inputDir}`);
+      } catch (e) {
+        console.error(`❌ Failed to delete input folder: ${inputDir}`, e);
+      }
+    }
+    
     // Clean up temporary upload files
     if (req.files) {
       for (const file of req.files) {
@@ -253,26 +293,8 @@ async function processTool(toolName, req, res) {
         }
       }
     }
-
-    // ✅ Respond immediately so frontend doesn't timeout
-    res.json({ success: true, jobId, status: "pending" });
-
-  } catch (err) {
-    console.error(`${toolName} error:`, err);
-    res.status(500).json({ error: err.message });
   }
 }
-
-// --- New status route ---
-app.get("/api/status/:jobId", async (req, res) => {
-  try {
-    const job = await History.findOne({ jobId: req.params.jobId });
-    if (!job) return res.status(404).json({ error: "Job not found" });
-    res.json({ jobId: job.jobId, status: job.status, outputs: job.outputs || [], error: job.error });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // Routes for each tool
 app.post("/api/flipkart", upload.array("files", 50), (req, res) =>
