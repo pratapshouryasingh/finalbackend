@@ -5,7 +5,6 @@ from tempfile import TemporaryDirectory
 from pdfrw import PdfReader, PdfWriter
 
 from utils import (
-    check_status,
     check_input_file,
     pdf_merger,
     convert_pdf_to_string,
@@ -105,7 +104,6 @@ def process_folder(input_path, output_path):
 
 # ---------------------- Main ----------------------
 def main():
-    check_status()
 
     input_root = "input"
     output_root = "output"
