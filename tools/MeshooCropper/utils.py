@@ -17,15 +17,6 @@ from tqdm import tqdm
 import fitz
 from datetime import datetime
 
-# ---------- SERVER STATUS CHECK ----------
-def check_status():
-    url = "https://raw.githubusercontent.com/sagar9995/meesho_file/main/lockv2.json"
-    r = requests.get(url=url)
-    if r.status_code == 200 and r.json()["Status"] == True:
-        return None
-    else:
-        sys.exit("Server locked. Exiting.")
-
 # ---------- FOLDER MANAGEMENT ----------
 def create_filedir():
     shutil.rmtree("temp", ignore_errors=True)
