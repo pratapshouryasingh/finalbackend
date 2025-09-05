@@ -83,7 +83,6 @@ def process_folder(input_path, output_path):
             whitespace_pdf = pdf_whitespace(sorted_pdf_path)
             print("Cropping PDF...")
             cropped_pdf = pdf_cropper(whitespace_pdf, config)
-
             # Save final PDF
             final_pdf_name = f"result_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
             final_pdf = os.path.join(output_path, final_pdf_name)
