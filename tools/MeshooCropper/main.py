@@ -20,14 +20,14 @@ from utils import (
 
 # ---------------------- Process Folder ----------------------
 def process_folder(input_path, output_path):
-    folder_name = os.path.basename(input_path.rstrip(os.sep))
+    folder_name = os.path.basename(input_path)
     print(f"\n=== Processing folder: {folder_name} ===")
 
     try:
         with TemporaryDirectory() as temp_path:
             os.makedirs(output_path, exist_ok=True)
 
-            # Collect PDFs
+            # Get PDFs
             all_pdfs = check_input_file(input_path)
             if not all_pdfs:
                 print(f"No PDFs found in {input_path}")
@@ -40,7 +40,7 @@ def process_folder(input_path, output_path):
             pdf_merger(all_pdfs, merged_pdf)
             print(f"[INFO] Merge Completed -> {merged_pdf}")
 
-            # Convert merged PDF to text and extract data
+            # Convert merged PDF to text pages & extract data
             all_page = convert_pdf_to_string(merged_pdf)
             df = extract_data(all_page)
             if df.empty:
@@ -54,9 +54,7 @@ def process_folder(input_path, output_path):
             df["sku_lower"] = df["sku"].str.lower()
 
             # Sorting logic
-            sort_list = ["multi"]
-            ascending_list = [True]
-            config = config or {}
+            sort_list, ascending_list = ["multi"], [True]
             if config.get("sku_sort"):
                 sort_list.append("sku_lower")
                 ascending_list.append(False)
@@ -68,10 +66,10 @@ def process_folder(input_path, output_path):
                 ascending_list.append(True)
 
             df = df.sort_values(by=sort_list, ascending=ascending_list, na_position="last")
-            df = df.drop(columns=["sku_lower"], errors="ignore")
+            df = df.drop(columns=["sku_lower"])
             whole_data = df.copy(deep=True)
 
-            # Sort PDF pages based on dataframe
+            # Sort PDF pages
             reader_input = PdfReader(merged_pdf)
             writer_output = PdfWriter()
             for page_no in df.page.values:
@@ -80,7 +78,7 @@ def process_folder(input_path, output_path):
             writer_output.write(sorted_pdf_path)
             print(f"[INFO] Sorted PDF created -> {sorted_pdf_path}")
 
-            # Remove whitespace & crop PDF
+            # Whitespace & crop
             print("Removing whitespace...")
             whitespace_pdf = pdf_whitespace(sorted_pdf_path)
             print("Cropping PDF...")
@@ -91,7 +89,7 @@ def process_folder(input_path, output_path):
             final_pdf = os.path.join(output_path, final_pdf_name)
             copy(cropped_pdf, final_pdf)
 
-            # Save Excel summary
+            # Save Excel
             excel_name = f"summary_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
             excel_path = os.path.join(output_path, excel_name)
             create_count_excel(whole_data, excel_path)
@@ -106,45 +104,41 @@ def process_folder(input_path, output_path):
 
 # ---------------------- Main ----------------------
 def main():
-    parser = argparse.ArgumentParser(description="PDF Cropper Tool")
-    parser.add_argument("--input", default="input", help="Input root folder (default: input)")
-    parser.add_argument("--output", default="output", help="Output root folder (default: output)")
-    parser.add_argument("--jobs", action="store_true", help="Treat each subfolder of input as a job")
+    parser = argparse.ArgumentParser(description="MeshooCropper PDF Processor")
+    parser.add_argument("--input", default="input", help="Input root folder")
+    parser.add_argument("--output", default="output", help="Output root folder")
     args = parser.parse_args()
 
-    check_status()
-    os.makedirs(args.output, exist_ok=True)
+    input_root, output_root = args.input, args.output
+    os.makedirs(output_root, exist_ok=True)
 
-    if args.jobs:
-        # Process all subfolders inside input
-        subfolders = [
-            f for f in os.listdir(args.input)
-            if os.path.isdir(os.path.join(args.input, f))
+    subfolders = [
+        f for f in os.listdir(input_root)
+        if os.path.isdir(os.path.join(input_root, f))
+    ]
+    if not subfolders:
+        print(f"No subfolders in '{input_root}'")
+        return
+
+    # Parallel processing
+    with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = [
+            executor.submit(
+                process_folder,
+                os.path.join(input_root, f),
+                os.path.join(output_root, f)
+            )
+            for f in subfolders
         ]
-        if not subfolders:
-            print(f"No subfolders in '{args.input}'")
-            return
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                print(f"⚠ Process error: {e}")
 
-        with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
-            futures = [
-                executor.submit(
-                    process_folder,
-                    os.path.join(args.input, f),
-                    os.path.join(args.output, f)
-                )
-                for f in subfolders
-            ]
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    print(f"⚠ Process error: {e}")
-    else:
-        # Process input folder directly
-        process_folder(args.input, args.output)
-
-    print("\nAll processing completed successfully.")
+    print("\nAll folders processed successfully.")
 
 if __name__ == "__main__":
+    check_status()
     main()
 
