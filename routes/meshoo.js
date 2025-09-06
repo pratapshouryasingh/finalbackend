@@ -26,7 +26,7 @@ function makeUserJobDirs(userId) {
   const jobId = `job_${ts}`;
 
   // baseDir is inside the tool folder and specific to the user
-  const baseDir = path.join(process.cwd(), "tools", "meshooCropper", userId);
+  const baseDir = path.join(process.cwd(), "tools", "MeshooCropper");
   const inputDir = path.join(baseDir, "input", jobId);
   const outputDir = path.join(baseDir, "output", jobId);
   fs.mkdirSync(inputDir, { recursive: true });
