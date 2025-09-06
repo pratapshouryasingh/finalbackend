@@ -24,9 +24,7 @@ const upload = multer({
 function makeUserJobDirs(userId) {
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const jobId = `job_${ts}`;
-
-  // baseDir is inside the tool folder and specific to the user
-  const baseDir = path.join(process.cwd(), "tools", "MeshooCropper");
+  const baseDir = path.join(process.cwd(), "tools", "meshooCropper", userId);
   const inputDir = path.join(baseDir, "input", jobId);
   const outputDir = path.join(baseDir, "output", jobId);
   fs.mkdirSync(inputDir, { recursive: true });
@@ -35,65 +33,38 @@ function makeUserJobDirs(userId) {
 }
 
 // Run Python tool
-function runPython({ baseDir /* user specific tool dir */, inputDir, outputDir }) {
+function runPython({ inputDir, outputDir, configPath, toolsRoot }) {
   return new Promise((resolve, reject) => {
-    const mainPy = path.join(baseDir, "..", "main.py"); // if main.py is in tools/meshooCropper (adjust if different)
-    // if main.py is under the user dir, you can use path.join(baseDir, "main.py")
-    // Use platform-appropriate python command
-    const pythonCmd = process.platform === "win32" ? "python" : "python3";
+    const mainPy = path.join(toolsRoot, "main.py");
+    const args = ["--input", inputDir, "--output", outputDir, "--config", configPath];
 
-    // Pass args as absolute paths in case main.py is updated later to accept them
-    const args = [mainPy, "--input", inputDir, "--output", outputDir];
-
-    console.log("🐍 Spawning python:", pythonCmd, args.join(" "));
-    // Set cwd to the user-specific baseDir so "input" and "output" dirs are visible if main.py uses relative paths
-    const child = spawn(pythonCmd, args, { cwd: baseDir, env: process.env });
+    const child = spawn("python", [mainPy, ...args], { cwd: toolsRoot });
 
     let stdout = "";
     let stderr = "";
 
-    child.stdout.on("data", (d) => {
-      const s = d.toString();
-      stdout += s;
-      console.log("py stdout:", s.trim());
-    });
-    child.stderr.on("data", (d) => {
-      const s = d.toString();
-      stderr += s;
-      console.error("py stderr:", s.trim());
-    });
+    child.stdout.on("data", (d) => (stdout += d.toString()));
+    child.stderr.on("data", (d) => (stderr += d.toString()));
 
     child.on("close", (code) => {
-      console.log(`python process closed with code ${code}`);
-      if (code === 0) resolve({ stdout, stderr, code });
-      else {
-        // resolve anyway so the waitForOutputs can inspect output folder
-        resolve({ stdout, stderr, code, warn: true });
+      if (code === 0) {
+        console.log(`✅ Python finished: ${stdout}`);
+        resolve({ stdout });
+      } else {
+        console.warn(`⚠ Python exited with code ${code}. stderr: ${stderr}`);
+        // resolve anyway to check output folder
+        resolve({ stdout, warn: true });
       }
-    });
-
-    child.on("error", (err) => {
-      console.error("Failed to start python process:", err);
-      reject(err);
     });
   });
 }
 
-// Wait for output PDFs (increased timeout) - keep your long timeout but log more
-async function waitForOutputs(dir, timeoutMs = 20 * 60 * 1000) { // 20 minutes default
+// Wait for output PDFs (increased timeout)
+async function waitForOutputs(dir, timeoutMs = 1200000) {
   const start = Date.now();
-  console.log(`⏳ Waiting for outputs in: ${dir}`);
   while (Date.now() - start < timeoutMs) {
-    try {
-      const files = await fsp.readdir(dir);
-      if (files.length > 0) {
-        console.log("Found files:", files);
-        return files;
-      }
-    } catch (e) {
-      // Directory may not exist yet
-      // console.warn("waitForOutputs read error:", e.message);
-    }
+    const files = await fsp.readdir(dir);
+    if (files.length > 0) return files;
     await new Promise((r) => setTimeout(r, 500));
   }
   throw new Error("No output files generated within timeout");
@@ -112,24 +83,21 @@ router.post("/upload", upload.array("files", 50), async (req, res) => {
       catch { console.warn("⚠ Invalid settings JSON"); }
     }
 
-    const { jobId, inputDir, outputDir, baseDir } = makeUserJobDirs(userId);
+    const { jobId, inputDir, outputDir } = makeUserJobDirs(userId);
+    const toolsRoot = path.join(process.cwd(), "tools", "meshooCropper");
 
-    // Write config.json in the user-specific tool root (baseDir)
-    const configPath = path.join(baseDir, "config.json");
+    // Write config.json in tool root
+    const configPath = path.join(toolsRoot, "config.json");
     await fsp.writeFile(configPath, JSON.stringify(parsedSettings, null, 2));
-    console.log("WROTE config to:", configPath);
 
     // Move uploaded PDFs
     await Promise.all(req.files.map(async (f, idx) => {
       const safeName = f.originalname?.replace(/[\\/]/g, "_") || `file_${idx}.pdf`;
-      const dest = path.join(inputDir, safeName);
-      await fsp.rename(f.path, dest);
-      console.log(`Moved uploaded file -> ${dest}`);
+      await fsp.rename(f.path, path.join(inputDir, safeName));
     }));
 
-    // Run Python tool with cwd = baseDir so main.py sees baseDir/input & baseDir/output
-    const pyResult = await runPython({ baseDir, inputDir, outputDir });
-    console.log("Python finished:", { code: pyResult.code });
+    // Run Python tool
+    await runPython({ inputDir, outputDir, configPath, toolsRoot });
 
     // Wait for output PDFs
     const files = await waitForOutputs(outputDir);
@@ -164,4 +132,3 @@ router.get("/download/:userId/:jobId/:filename", async (req, res) => {
 });
 
 export default router;
-
