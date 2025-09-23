@@ -27,7 +27,7 @@ const allowedOrigins = [
   "https://shippinglablecropper.vercel.app",
   "https://shippinglablecropper-git-main-pratapshouryasinghs-projects.vercel.app",
   "http://localhost:5173",
-  "https://shippingcropper.vercel.app"
+  "https://shippingcropper.vercel.app",
   "http://localhost:5000",
   "https://www.shippinglabelcrop.in",
   "https://shippinglabelcrop.in",
