@@ -32,6 +32,7 @@ const allowedOrigins = [
   "https://www.shippinglabelcrop.in",
   "https://shippinglabelcrop.in",
   "https://aws.shippinglabelcrop.in",
+  "https://app.shippinglabelcrop.in"
 ];
 
 app.use(
